@@ -1,4 +1,4 @@
-import NativeAhrs, { type AhrsData } from './NativeAhrs';
+import NativeAhrs, { type AhrsData, type Rotation } from './NativeAhrs';
 
 export type AhrsCallback = (data: AhrsData) => void;
 
@@ -105,6 +105,10 @@ class AhrsSensor {
   }
 
   public setGain(gain: number): void {
+    if (!Number.isFinite(gain)) {
+      console.warn('AHRS gain must be a finite number');
+      return;
+    }
     try {
       if (__DEV__) {
         console.log(`🎛️ Setting AHRS gain to ${gain}`);
@@ -115,7 +119,13 @@ class AhrsSensor {
     }
   }
 
-  public setRotation(rotation: string): void {
+  public setRotation(rotation: Rotation): void {
+    if (rotation !== 'none' && rotation !== 'left' && rotation !== 'right') {
+      console.warn(
+        `AHRS rotation must be 'none' | 'left' | 'right', got: ${String(rotation)}`
+      );
+      return;
+    }
     try {
       if (__DEV__) {
         console.log(`🔄 Setting AHRS rotation to ${rotation}`);

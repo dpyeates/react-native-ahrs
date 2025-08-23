@@ -7,6 +7,8 @@ export type AhrsData = {
   heading: number; // in degrees true, 0-360
 };
 
+export type Rotation = 'none' | 'left' | 'right';
+
 export interface Spec extends TurboModule {
   startAhrs(): void;
   stopAhrs(): void;
@@ -14,7 +16,7 @@ export interface Spec extends TurboModule {
   levelAhrs(): void;
   setAhrsRate(newRate: number): void;
   setAhrsGain(newGain: number): void;
-  setAhrsRotation(newRotation: string): void;
+  setAhrsRotation(newRotation: Rotation): void;
   readonly onAhrsUpdate: CodegenTypes.EventEmitter<AhrsData>;
 }
 
