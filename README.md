@@ -4,6 +4,8 @@
 
 </div>
 
+![](https://github.com/dpyeates/react-native-ahrs/blob/main/example/react-native-ahrs.gif)
+
 react-native-ahrs is an Attitude And Heading Reference System (AHRS) for React Native iOS and Android devices. It uses the device's internal sensors (accelerometer, gyroscope, magnetometer) to provide roll, pitch and magnetic heading in real-time.
 
 It is implemented using C/C++, JSI (JavaScript Interface), and Turbo Modules for maximum performance and low latency.
