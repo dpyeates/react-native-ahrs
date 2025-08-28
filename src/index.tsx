@@ -1,5 +1,8 @@
 import NativeAhrs, { type AhrsData, type Rotation } from './NativeAhrs';
 
+// Re-export types for consumers of the library
+export type { AhrsData, Rotation } from './NativeAhrs';
+
 export type AhrsCallback = (data: AhrsData) => void;
 
 class AhrsSensor {

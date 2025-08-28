@@ -51,3 +51,10 @@ target_link_libraries(ahrs
     ${log-lib}
     android
 )
+
+if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 81)
+  target_compile_reactnative_options(ahrs PRIVATE)
+endif()
+
+
+

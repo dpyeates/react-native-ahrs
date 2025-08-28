@@ -201,5 +201,9 @@ static inline float SmoothHeading(float new_heading) {
     smooth_y = alpha * y + (1 - alpha) * smooth_y;
   }
   float avg_rad = atan2(smooth_y, smooth_x);
-  return normalizeHeading(FusionRadiansToDegrees(avg_rad) + 90 );
+#ifdef ANDROID
+return normalizeHeading(FusionRadiansToDegrees(avg_rad) + 90);
+#else
+  return normalizeHeading(FusionRadiansToDegrees(avg_rad) - 90);
+#endif
 }

@@ -1,4 +1,3 @@
-import React from 'react';
 import { useEffect, useState, useMemo } from 'react';
 import { StyleSheet, Text, TouchableHighlight, View } from 'react-native';
 import RNOrientationDirector, {
@@ -42,11 +41,12 @@ export default function App() {
   );
 
   useEffect(() => {
-    Ahrs.addListener(setAttitude);
+    const remove = Ahrs.addListener((data) => setAttitude(data));
     Ahrs.start();
     Ahrs.setRate(20);
     RNOrientationDirector.lockTo(Orientation.portrait, OrientationType.device);
     return () => {
+      remove?.();
       Ahrs.stop();
       RNOrientationDirector.unlock();
     };
