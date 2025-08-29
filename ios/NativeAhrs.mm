@@ -1,5 +1,5 @@
 #import "NativeAhrs.h"
-#import "FusionBridge.h"
+#import "../fusion/FusionBridge.h"
 
 @implementation NativeAhrs
 RCT_EXPORT_MODULE()
