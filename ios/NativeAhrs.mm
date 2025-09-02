@@ -134,7 +134,7 @@ RCT_EXPORT_METHOD(setAhrsRotation:(NSString *)newRotation) {
 }
 
 RCT_EXPORT_METHOD(isSupported:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
+                  reject:(RCTPromiseRejectBlock)reject) {
   NSLog(@"DeviceMotionAvailable: %@, AccelerometerAvailable: %@, GyroAvailable: %@, MagnetometerAvailable: %@",
     self.motionManager.isDeviceMotionAvailable ? @"YES" : @"NO",
     self.motionManager.isAccelerometerAvailable ? @"YES" : @"NO",
