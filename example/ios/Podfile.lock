@@ -1,5 +1,5 @@
 PODS:
-  - Ahrs (1.0.3):
+  - Ahrs (1.2.1):
     - boost
     - DoubleConversion
     - fast_float
@@ -1804,7 +1804,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - react-native-skia (2.2.8):
+  - react-native-skia (2.2.9):
     - boost
     - DoubleConversion
     - fast_float
@@ -2576,7 +2576,7 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
-  Ahrs: 37d0ead87783453f82f5c0f565cc101477aca7c7
+  Ahrs: 862c4b7adaf24dc067e5f06ddeecf4ad0800a9ed
   boost: 7e761d76ca2ce687f7cc98e698152abd03a18f90
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   fast_float: b32c788ed9c6a8c584d114d0047beda9664e7cc6
@@ -2618,7 +2618,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 91e0eab42a6ae7f3e34091a126d70fc53bd3823e
   React-microtasksnativemodule: 1ead4fe154df3b1ba34b5a9e35ef3c4bdfa72ccb
   react-native-orientation-director: cc12395595a73fe2d1b0c821d97717e55217af23
-  react-native-skia: 35cbd2808e92f14aeb1b149c803b7f53ab453a52
+  react-native-skia: 79cd9d8499ee52fa92c21dacc5c2415774dfc05b
   React-NativeModulesApple: eff2eba56030eb0d107b1642b8f853bc36a833ac
   React-oscompat: b12c633e9c00f1f99467b1e0e0b8038895dae436
   React-perflogger: 58d12c4e5df1403030c97b9c621375c312cca454
@@ -2654,4 +2654,4 @@ SPEC CHECKSUMS:
 
 PODFILE CHECKSUM: 8114e2324d472cafadd08db8b17dd2f4e786c410
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2

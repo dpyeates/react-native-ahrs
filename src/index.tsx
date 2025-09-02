@@ -14,7 +14,18 @@ class AhrsSensor {
   }
 
   public async isSupported(): Promise<boolean> {
-    return await Ahrs.isSupported();
+    try {
+      const supported = await NativeAhrs.isSupported();
+      if (supported) {
+        console.log('✅ AHRS supported on this device');
+      } else {
+        console.warn('❌ AHRS not supported on this device');
+      }
+      return supported;
+    } catch (e) {
+      console.warn('Failed to query AHRS support', e);
+      return false;
+    }
   }
 
   private masterCallback = (data: AhrsData) => {
