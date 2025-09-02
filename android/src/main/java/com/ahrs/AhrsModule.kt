@@ -11,6 +11,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.turbomodule.core.interfaces.TurboModule
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactMethod
 
 val Float.hz: Long get() = (1_000_000_000.0 / this).toLong()
 
@@ -128,6 +130,13 @@ class AhrsModule(reactContext: ReactApplicationContext) :
       0
     }
     setAhrsInterfaceRotation(rotation)
+  }
+
+  override fun isSupported(promise: Promise) {
+    val hasGyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null
+    val hasAccel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
+    val hasMag = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != null
+    promise.resolve(hasGyro && hasAccel && hasMag)
   }
 
   override fun onSensorChanged(event: SensorEvent) {

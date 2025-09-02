@@ -94,6 +94,7 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
 | setGain(gain)         | Set complementary filter gain.                  | gain: number                       | Typical start: 3.0; higher = more accel/mag influence.                         |
 | setRotation(rotation) | Apply extra 90° step rotation for UI alignment. | rotation: 'none','left' ,'right'   | Use with your orientation/locking logic.                                       |
 | getStatus()           | Get JS-side status.                             | —                                  | { isRunning: boolean, listenerCount: number }                                  |
+| isSupported()         | Check if required sensors are available.        | —                                  | Promise<boolean>. Useful to gate features or show guidance.                    |
 
 
 
@@ -102,18 +103,29 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
 - Purpose: Subscribe to AHRS updates (roll, pitch, heading).
 - Parameters: callback – a function receiving AhrsData at the configured rate.
 - Returns: unsubscribe function to remove this callback. When the final listener unsubscribes, AHRS stops automatically.
-- Behavior: Multiple listeners are supported; each receives the same AhrsData object values per tick.
-- Notes: Register the listener before calling start(). Avoid long-running logic in the callback to keep UI responsive.
+- Behavior: Multiple listeners are supported; each receives the same AhrsData values per tick.
+- Notes: Register the listener before calling start(). Avoid long-running logic in the callback to keep the UI responsive.
 - Example:
-  const unsubscribe = Ahrs.addListener((data) => { /_ use data.roll/pitch/heading _/ });
+  ```ts
+  const unsubscribe = Ahrs.addListener(({ roll, pitch, heading }) => {
+    // Use values here; keep it fast
+    console.log('AHRS:', Math.round(roll), Math.round(pitch), Math.round(heading));
+  });
+
   // later
   unsubscribe();
+  ```
 
 #### removeAllListeners(): void
 
 - Purpose: Remove every registered listener and stop AHRS if running.
 - Behavior: Clears internal listener set and calls stop(). Safe to call even if there are no listeners.
 - Use when: Tearing down a screen or resetting subscriptions globally.
+- Example:
+  ```ts
+  // E.g., on logout or screen unmount
+  Ahrs.removeAllListeners();
+  ```
 
 #### start(): void
 
@@ -121,23 +133,50 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
 - Behavior: No-ops with a warning if no listeners are registered. Subsequent calls while running are ignored.
 - Side effects: Allocates/starts native sensors and AHRS processing.
 - Errors: If native start fails, an error is thrown (and logged in DEV); wrap in try/catch if needed.
+- Example:
+  ```ts
+  const unsubscribe = Ahrs.addListener((data) => {/* ... */});
+  try {
+    Ahrs.start();
+  } catch (e) {
+    console.error('Failed to start AHRS', e);
+  }
+  // ... later
+  unsubscribe();
+  Ahrs.stop();
+  ```
 
 #### stop(): void
 
 - Purpose: Stop native processing and halt updates.
 - Behavior: Safe to call multiple times; subsequent calls while not running are ignored.
 - When to call: On component unmount or when you temporarily don’t need updates to save battery/CPU.
+- Example:
+  ```ts
+  // On screen blur/unmount
+  Ahrs.stop();
+  ```
 
 #### reset(): void
 
 - Purpose: Reinitialize AHRS internal state (e.g., reinitialize the filter/quaternion).
 - Behavior: Does not change rate or gain settings. Useful after large disturbances or when you want to rebaseline.
+- Example:
+  ```ts
+  // After a significant movement or to rebaseline
+  Ahrs.reset();
+  ```
 
 #### level(): void
 
 - Purpose: Zero pitch and roll relative to the current device orientation (i.e., treat current attitude as level).
 - Behavior: Leaves heading unchanged. Use when the device rests on a surface that isn’t perfectly level but should be treated as such.
 - UX tip: Provide a “Level” button that users can press while the device is in a desired reference pose.
+- Example:
+  ```ts
+  // Bind to a "Level" button when the device is stationary
+  Ahrs.level();
+  ```
 
 #### setRate(newRate: number): void
 
@@ -145,14 +184,20 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
 - Valid range: 1–60 Hz. Values outside this range trigger a console warning and are ignored.
 - Behavior: Takes effect immediately for subsequent updates.
 - Trade-offs: Higher rates increase responsiveness but use more CPU/battery; lower rates save power but increase latency.
-- Example: Ahrs.setRate(20);
+- Example:
+  ```ts
+  Ahrs.setRate(20);
+  ```
 
 #### setGain(gain: number): void
 
 - Purpose: Control the AHRS filter gain (complementary filter balance between gyro integration and accel/mag correction).
 - Behavior: Larger gain increases responsiveness to accel/mag (less drift, but more sensitive to motion/magnetic noise). Smaller gain trusts gyro more (smoother during dynamic motion, but more drift over time).
 - Typical starting point: 3.0. Tune per device/environment.
-- Example: Ahrs.setGain(3.0);
+- Example:
+  ```ts
+  Ahrs.setGain(3.0);
+  ```
 
 #### setRotation(rotation: 'none' | 'left' | 'right'): void
 
@@ -162,7 +207,10 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
   - 'left' – rotate 90° to match landscape-left UI.
   - 'right' – rotate 90° to match landscape-right UI.
 - Behavior: Intended to keep roll/pitch intuitive when the app UI is rotated. Use together with your orientation/locking logic.
-- Example: Ahrs.setRotation('left');
+- Example:
+  ```ts
+  Ahrs.setRotation('left');
+  ```
 
 #### getStatus(): { isRunning: boolean; listenerCount: number }
 
@@ -171,6 +219,29 @@ All functions are available on the Ahrs singleton. Below you will find detailed 
   - isRunning – whether AHRS has been started and not yet stopped.
   - listenerCount – number of currently registered JS listeners.
 - Use for: Debug UIs and guard logic (e.g., only show “Start” if not running).
+- Example:
+  ```ts
+  const { isRunning, listenerCount } = Ahrs.getStatus();
+  console.log(`AHRS running: ${isRunning}, listeners: ${listenerCount}`);
+  ```
+
+#### isSupported(): Promise<boolean>
+
+- Purpose: Determine if the current device likely supports AHRS (i.e., has the required sensors).
+- Returns: Promise<boolean> resolving to true if the necessary sensors are present; false otherwise.
+- Platform notes:
+  - iOS: Uses CMMotionManager to check availability of deviceMotion, accelerometer, gyroscope, and magnetometer.
+  - Android: Checks SensorManager for accelerometer, gyroscope, and magnetic field sensors.
+- Typical usage: Gate feature usage or show guidance to the user if unsupported.
+- Example:
+  ```ts
+  const supported = await Ahrs.isSupported();
+  if (!supported) {
+    Alert.alert('AHRS not supported', 'This device lacks required sensors.');
+    return;
+  }
+  // proceed to add listener and start
+  ```
 
 ## Common usage pattern
 

@@ -17,6 +17,7 @@ export interface Spec extends TurboModule {
   setAhrsRate(newRate: number): void;
   setAhrsGain(newGain: number): void;
   setAhrsRotation(newRotation: Rotation): void;
+  isSupported(): Promise<boolean>;
   readonly onAhrsUpdate: CodegenTypes.EventEmitter<AhrsData>;
 }
 

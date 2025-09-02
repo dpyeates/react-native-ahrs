@@ -133,6 +133,15 @@ RCT_EXPORT_METHOD(setAhrsRotation:(NSString *)newRotation) {
   setAhrsInterfaceRotation(self.rotation);
 }
 
+RCT_EXPORT_METHOD(isSupported:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  BOOL supported = self.motionManager.isDeviceMotionAvailable &&
+                   self.motionManager.isAccelerometerAvailable &&
+                   self.motionManager.isGyroAvailable &&
+                   self.motionManager.isMagnetometerAvailable;
+  resolve(@(supported));
+}
+
 #pragma mark - Lifecycle
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
