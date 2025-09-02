@@ -13,6 +13,10 @@ class AhrsSensor {
     NativeAhrs?.onAhrsUpdate(this.masterCallback);
   }
 
+  public async isSupported(): Promise<boolean> {
+    return await Ahrs.isSupported();
+  }
+
   private masterCallback = (data: AhrsData) => {
     this.callbacks.forEach((cb) => {
       try {

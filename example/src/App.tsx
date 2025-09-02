@@ -41,6 +41,9 @@ export default function App() {
   );
 
   useEffect(() => {
+    Ahrs.isSupported().then((supported) => {
+      console.log('AHRS supported:', supported ? 'YES' : 'NO');
+    });
     const remove = Ahrs.addListener((data) => setAttitude(data));
     Ahrs.start();
     Ahrs.setRate(20);

@@ -136,6 +136,9 @@ class AhrsModule(reactContext: ReactApplicationContext) :
     val hasGyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null
     val hasAccel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
     val hasMag = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != null
+    Log.d("SensorAvailability", "AccelerometerAvailable: ${if (hasAccel) "YES" else "NO"}, " +
+          "GyroAvailable: ${if (hasGyro) "YES" else "NO"}, " +
+          "MagnetometerAvailable: ${if (hasMag) "YES" else "NO"}")
     promise.resolve(hasGyro && hasAccel && hasMag)
   }
 
