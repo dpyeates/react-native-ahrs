@@ -37,7 +37,7 @@ void initAhrs(int platform, int rotation, float gain) {
       .magneticRejection = 90.0f,
       .recoveryTriggerPeriod = 0,
   };
-  zeroReference = {.element = {1.0f, 0.0f, 0.0f, 0.0f}};
+  zeroReference = FUSION_IDENTITY_QUATERNION;
   FusionAhrsSetSettings(&ahrs, &settings);
   FusionAhrsReset(&ahrs);
 }
