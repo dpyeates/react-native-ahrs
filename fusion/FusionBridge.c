@@ -98,13 +98,13 @@ void zeroAhrs(void) {
   useQOffset = !useQOffset;
 };
 
-float getAhrsRoll(void) { return euler.angle.roll; };
+float getAhrsRoll(void) { return ahrs.initialising ? 0.0f : euler.angle.roll; };
 
-float getAhrsPitch(void) { return euler.angle.pitch; };
+float getAhrsPitch(void) { return  ahrs.initialising ? 0.0f : euler.angle.pitch; };
 
-float getAhrsYaw(void) { return euler.angle.yaw; };
+float getAhrsYaw(void) { return  ahrs.initialising ? 0.0f : euler.angle.yaw; };
 
-float getAhrsHeading(void) { return heading; };
+float getAhrsHeading(void) { return ahrs.initialising ? 0.0f : heading; };
 
 /**
  * @brief Configures the alignment of the sensors based upon the devices rotation
