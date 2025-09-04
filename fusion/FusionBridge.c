@@ -10,7 +10,7 @@ static inline FusionQuaternion FusionQuaternionConjugate(FusionQuaternion quater
 static inline FusionQuaternion FusionEulerToQuaternion(const FusionEuler euler);
 static inline float SmoothHeading(float new_heading);
 
-FusionQuaternion zeroReference = {.element = {1.0f, 0.0f, 0.0f, 0.0f}};
+FusionQuaternion zeroReference;
 FusionOffset offset;
 FusionAhrs ahrs;
 FusionEuler euler;
@@ -37,6 +37,7 @@ void initAhrs(int platform, int rotation, float gain) {
       .magneticRejection = 90.0f,
       .recoveryTriggerPeriod = 0,
   };
+  zeroReference = {.element = {1.0f, 0.0f, 0.0f, 0.0f}};
   FusionAhrsSetSettings(&ahrs, &settings);
   FusionAhrsReset(&ahrs);
 }
