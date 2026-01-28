@@ -25,13 +25,16 @@ find_library(
     log
 )
 
+# Eigen is included directly in the repository
+# Headers are at ../fusionml/src/Eigen
+
 # Create the shared library
 add_library(ahrs SHARED
     jni/AhrsModuleJNI.cpp
-    ../fusion/FusionAhrs.c
-    ../fusion/FusionCompass.c
-    ../fusion/FusionOffset.c
-    ../fusion/FusionBridge.c
+    ../fusionml/src/uNavINS.cpp
+    ../fusionml/src/AltitudeCalculator.cpp
+    ../fusionml/src/FlightPhaseDetector.cpp
+    ../fusionml/src/JsonRecorder.cpp
     "${RN_DIR}/ReactCommon/jsi/jsi/jsi.cpp"
 )
 
@@ -39,7 +42,8 @@ add_library(ahrs SHARED
 target_include_directories(
     ahrs
     PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../fusion"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../fusionml/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../fusionml/src/Eigen"
     "${RN_DIR}/ReactCommon/jsi"
     "${RN_DIR}/ReactCommon"
     "${RN_DIR}/ReactAndroid/src/main/jni"
@@ -50,6 +54,7 @@ target_include_directories(
 target_link_libraries(ahrs
     ${log-lib}
     android
+    z  # zlib for gzip compression
 )
 
 if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 81)

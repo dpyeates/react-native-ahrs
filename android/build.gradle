@@ -86,6 +86,8 @@ dependencies {
   implementation "com.facebook.react:react-android"
   implementation("com.facebook.fbjni:fbjni:0.3.0")
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  implementation "androidx.core:core:1.12.0" // For ContextCompat and ActivityCompat
+  implementation "com.squareup.okhttp3:okhttp:4.12.0" // For X-Plane WebSocket connection
 }
 
 react {

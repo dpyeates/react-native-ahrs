@@ -1,0 +1,2 @@
+# Git submodules removed - Eigen, HighFive, and HDF5 are now included directly in the repository
+# This makes the module self-contained and eliminates the need for git submodule initialization

@@ -1,6 +1,8 @@
 buildscript {
     ext {
         buildToolsVersion = "36.0.0"
+        // Minimum SDK version: API 24 (Android 7.0 Nougat)
+        // Note: We do not support devices with API < 14 (Android 4.0)
         minSdkVersion = 24
         compileSdkVersion = 36
         targetSdkVersion = 36

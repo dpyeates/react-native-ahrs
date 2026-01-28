@@ -88,3 +88,6 @@ android/generated
 
 # React Native Nitro Modules
 nitrogen/
+
+# fusionml C++ test build artifacts
+fusionml/tests/.build/
