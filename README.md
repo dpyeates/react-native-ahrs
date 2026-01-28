@@ -10,8 +10,6 @@
 
 </div>
 
-![](https://github.com/dpyeates/react-native-ahrs/blob/main/example/react-native-ahrs.gif)
-
 **react-native-ahrs** is an Attitude and Heading Reference System (AHRS) for React Native iOS and Android. It fuses the devices onboard accelerometer, gyroscope, magnetometer, GPS, and barometer data via an Extended Kalman Filter (EKF) to provide attitude, heading, position, velocity, and flight-phase estimates.
 
 ## Features
