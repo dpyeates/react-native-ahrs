@@ -156,7 +156,7 @@ class uNavINS {
     // GPS measurement noise std dev (m/s)
     const float SIG_GPS_V = 0.5f;
     // Std dev of magnetometer measurement noise (nT)
-    const float SIG_MAG = 200.0f;
+    const float SIG_MAG = 1500.0f;
     // Std dev of magnetometer bias random walk (nT)
     const float SIG_M_D = 50.0f;
     // Correlation time for mag bias (seconds) - slow drift

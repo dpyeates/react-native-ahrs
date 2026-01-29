@@ -205,7 +205,7 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
     P = PHI*P*PHI.transpose()+Q;
     P = 0.5f*(P+P.transpose());
 
-    // GPS + Magnetometer measurement update
+    // GPS measurement update
     if ((TOW - previousTOW) > 0) {
       previousTOW = TOW;
       lla_gps(0,0) = lat;
@@ -238,48 +238,11 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       H.setZero();
       H.block(0,0,6,6) = Eigen::Matrix<float,6,6>::Identity();
       
-      // Magnetometer measurement update (if expected field is available)
-      // Check if expected field values are valid (not NAN)
-      bool mag_field_valid = std::isfinite(bn) && std::isfinite(be) && std::isfinite(bd);
-      
-      if (mag_field_valid) {
-        // Convert measured mag from body frame to nT
-        // hx, hy, hz are the measured magnetometer values in body frame (uT)
-        float hx_meas = hx * 1000.0f;  // uT to nT conversion
-        float hy_meas = hy * 1000.0f;
-        float hz_meas = hz * 1000.0f;
-        
-        // Expected mag field in NED frame (passed as parameters, already in nT)
-        Eigen::Matrix<float,3,1> mag_ned;
-        mag_ned << bn, be, bd;
-        
-        // Rotate expected NED field to body frame using current attitude DCM
-        mag_expected_body = C_N2B * mag_ned;
-        
-        // Magnetometer innovation: y_mag = measured - expected - bias
-        y(6,0) = hx_meas - mag_expected_body(0) - mbx;
-        y(7,0) = hy_meas - mag_expected_body(1) - mby;
-        y(8,0) = hz_meas - mag_expected_body(2) - mbz;
-        
-        // Magnetometer Jacobian with respect to attitude (states 6,7,8)
-        // H_mag = d(C_N2B * mag_ned)/d(attitude)
-        // Using small angle approximation for attitude perturbations:
-        // delta_h_body = -C_N2B * sk(mag_ned) * delta_attitude
-        // So H_mag_att = -C_N2B * sk(mag_ned)
-        Eigen::Matrix<float,3,3> H_mag_att = -C_N2B * sk(mag_ned);
-        H.block(6,6,3,3) = H_mag_att;
-        
-        // Magnetometer Jacobian with respect to mag bias (states 15,16,17)
-        // y = h_meas - h_expected - bias, so d(y)/d(bias) = -I
-        H.block(6,15,3,3) = -Eigen::Matrix<float,3,3>::Identity();
-      } else {
-        // No magnetometer update - set innovation to zero
-        y(6,0) = 0.0f;
-        y(7,0) = 0.0f;
-        y(8,0) = 0.0f;
-        // Zero out mag rows in H to disable mag update
-        H.block(6,0,3,18).setZero();
-      }
+      // GPS-only update: zero out magnetometer rows
+      y(6,0) = 0.0f;
+      y(7,0) = 0.0f;
+      y(8,0) = 0.0f;
+      H.block(6,0,3,18).setZero();
       
       // Kalman gain (18x9)
       K = P*H.transpose()*(H*P*H.transpose() + R).inverse();
@@ -326,6 +289,92 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       mby = mby + x(16,0);
       mbz = mbz + x(17,0);
     }
+
+    // Magnetometer measurement update (independent of GPS TOW)
+    static elapsedMicros mag_update_timer;
+    const float MAG_UPDATE_PERIOD_MS = 100.0f; // 10 Hz max
+    bool mag_update_ready = (mag_update_timer / 1000.0f) >= MAG_UPDATE_PERIOD_MS;
+    bool mag_field_valid = std::isfinite(bn) && std::isfinite(be) && std::isfinite(bd);
+
+    if (mag_update_ready && mag_field_valid) {
+      mag_update_timer = 0;
+
+      // Convert measured mag from body frame to nT
+      float hx_meas = hx * 1000.0f;
+      float hy_meas = hy * 1000.0f;
+      float hz_meas = hz * 1000.0f;
+
+      // Expected mag field in NED frame (passed as parameters, already in nT)
+      Eigen::Matrix<float,3,1> mag_ned;
+      mag_ned << bn, be, bd;
+
+      // Rotate expected NED field to body frame using current attitude DCM
+      mag_expected_body = C_N2B * mag_ned;
+
+      // Field magnitude gating to reject severe interference
+      float measured_field = sqrtf(hx_meas*hx_meas + hy_meas*hy_meas + hz_meas*hz_meas);
+      float expected_field = sqrtf(bn*bn + be*be + bd*bd);
+      float field_ratio = (expected_field > 0.0f) ? (measured_field / expected_field) : 0.0f;
+      bool mag_reasonable = (field_ratio > 0.5f && field_ratio < 2.0f);
+
+      if (mag_reasonable) {
+        // Yaw-only magnetometer update: compare horizontal mag direction
+        float mx_meas = hx_meas - mbx;
+        float my_meas = hy_meas - mby;
+        float mx_exp = mag_expected_body(0);
+        float my_exp = mag_expected_body(1);
+
+        // Compute signed yaw error between expected and measured horizontal vectors
+        float cross_z = mx_exp * my_meas - my_exp * mx_meas;
+        float dot_xy = mx_exp * mx_meas + my_exp * my_meas;
+        float yaw_error = constrainAngle180(atan2f(cross_z, dot_xy));
+
+        // Innovation gate (3-sigma) using equivalent yaw noise
+        float sigma_yaw = (expected_field > 0.0f) ? (SIG_MAG / expected_field) : 0.0f;
+        float innov_gate = 3.0f * sigma_yaw;
+
+        if (sigma_yaw > 0.0f && fabsf(yaw_error) < innov_gate) {
+          // Measurement model: yaw error directly observes attitude yaw state (state 8)
+          Eigen::Matrix<float,1,18> H_mag;
+          H_mag.setZero();
+          H_mag(0,8) = 1.0f;
+
+          float R_mag = sigma_yaw * sigma_yaw;
+
+          // Kalman gain for yaw-only magnetometer update (18x1)
+          float S_mag = (H_mag * P * H_mag.transpose())(0,0) + R_mag;
+          Eigen::Matrix<float,18,1> K_mag = (P * H_mag.transpose()) / S_mag;
+
+          // Covariance update (Joseph form for numerical stability)
+          Eigen::Matrix<float,18,18> I_KH_mag = Eigen::Matrix<float,18,18>::Identity() - K_mag * H_mag;
+          P = I_KH_mag * P * I_KH_mag.transpose() + K_mag * R_mag * K_mag.transpose();
+          P = 0.5f*(P + P.transpose());
+
+          // State update with yaw-only measurement
+          x = K_mag * yaw_error;
+
+          // Apply attitude correction from yaw-only magnetometer update
+          dq(0,0) = 1.0f;
+          dq(1,0) = x(6,0);
+          dq(2,0) = x(7,0);
+          dq(3,0) = x(8,0);
+          quat = qmult(quat,dq);
+          quat.normalize();
+
+          // Obtain euler angles from quaternion
+          theta = asinf(-2.0f*(quat(1,0)*quat(3,0)-quat(0,0)*quat(2,0)));
+          phi = atan2f(2.0f*(quat(0,0)*quat(1,0)+quat(2,0)*quat(3,0)),1.0f-2.0f*(quat(1,0)*quat(1,0)+quat(2,0)*quat(2,0)));
+          psi = atan2f(2.0f*(quat(1,0)*quat(2,0)+quat(0,0)*quat(3,0)),1.0f-2.0f*(quat(2,0)*quat(2,0)+quat(3,0)*quat(3,0)));
+
+          // Simple horizontal mag bias estimator (yaw-only)
+          // Slowly adapt mbx/mby to reduce steady-state yaw error without affecting roll/pitch
+          const float MAG_BIAS_ALPHA = 0.01f; // small adaptation rate
+          mbx += MAG_BIAS_ALPHA * (hx_meas - mag_expected_body(0) - mbx);
+          mby += MAG_BIAS_ALPHA * (hy_meas - mag_expected_body(1) - mby);
+        }
+      }
+    }
+
     // Get the new Specific forces and Rotation Rate,
     // use in the next time update
     f_b(0,0) = ax - abx;
