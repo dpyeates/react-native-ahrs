@@ -547,7 +547,6 @@
   
   if (_filter && point.hasGyro && point.hasAcc) {
     // Check if we have new GPS data
-    BOOL hasNewGps = NO;
     if (hasGps) {
       double newLatRad = latDeg * M_PI / 180.0;
       double newLonRad = lonDeg * M_PI / 180.0;
@@ -557,7 +556,6 @@
           fabs(newLonRad - self.lastLonRad) > 1e-8 ||
           fabs(altM - self.lastAltM) > 0.1 ||
           timestamp != self.lastGpsTimestampUs) {
-        hasNewGps = YES;
         self.hasGpsFix = YES;
         self.lastLatRad = newLatRad;
         self.lastLonRad = newLonRad;

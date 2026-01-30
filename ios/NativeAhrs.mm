@@ -86,8 +86,6 @@ RCT_EXPORT_MODULE()
     _running = false;
     _emitRateHz = 5.0;
     _nextEmitTime = 0;
-    _lastUsedLocationTimestamp = 0;
-    _lastUsedBaroTimestamp = 0;
     _previousLocation = nil;
     
     _baroCalibrated = false;

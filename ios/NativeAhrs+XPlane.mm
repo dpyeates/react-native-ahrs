@@ -404,7 +404,6 @@ static const NSInteger XPLANE_PORT = 8765;
   
   if (hasGyro && hasAccel && _filter) {
     // Check if we have new GPS data (compare lat/lon/alt to detect changes)
-    BOOL hasNewGps = NO;
     if (hasGps) {
       double newLatRad = latDeg * M_PI / 180.0;
       double newLonRad = lonDeg * M_PI / 180.0;
@@ -413,7 +412,6 @@ static const NSInteger XPLANE_PORT = 8765;
           fabs(newLatRad - self.lastLatRad) > 1e-8 ||
           fabs(newLonRad - self.lastLonRad) > 1e-8 ||
           fabs(altM - self.lastAltM) > 0.1) {
-        hasNewGps = YES;
         self.hasGpsFix = YES;
         self.lastLatRad = newLatRad;
         self.lastLonRad = newLonRad;

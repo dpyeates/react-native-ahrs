@@ -130,17 +130,15 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
     return;
   }
   
-  // Recalculate if moved 10+ nautical miles (18,520 meters) since last
-  // declination calc
-  const double MIN_DISTANCE_FOR_DECLINATION_UPDATE_M = 18520.0;
+  // Recalculate if moved 1 nautical miles since last declination calc
+  const double MIN_DISTANCE_FOR_DECLINATION_UPDATE_M = 1852.0;
   BOOL needDeclinationUpdate = NO;
   
   if (self.lastDeclinationLatRad == 0.0 && self.lastDeclinationLonRad == 0.0) {
     // First time - always calculate
     needDeclinationUpdate = YES;
   } else {
-    double distanceM = calculateDistanceMeters(
-                                               self.lastDeclinationLatRad, self.lastDeclinationLonRad, latRad, lonRad);
+    double distanceM = calculateDistanceMeters(self.lastDeclinationLatRad, self.lastDeclinationLonRad, latRad, lonRad);
     if (distanceM >= MIN_DISTANCE_FOR_DECLINATION_UPDATE_M) {
       needDeclinationUpdate = YES;
     }
@@ -227,41 +225,21 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   double velE = gps.speed_ms * sin(trackRad);
   double velD = -gps.vs_ms;
   
-  // Check if we have new GPS data with acceptable accuracy
-  BOOL hasNewGps = NO;
+  // Check if we have new GPS data
   if (gps.valid && gps.timestamp_us != self.lastGpsTimestampUs) {
-    // Check GPS accuracy using shared helper method
-    BOOL accuracyAcceptable = [self hasAcceptableGpsAccuracy:gps];
+    self.hasGpsFix = YES;
+    double newLatRad = gps.lat_deg * M_PI / 180.0;
+    double newLonRad = gps.lon_deg * M_PI / 180.0;
+    self.lastLatRad = newLatRad;
+    self.lastLonRad = newLonRad;
+    self.lastAltM = gps.alt_m;
+    self.lastGpsTimestampUs = gps.timestamp_us;
     
-    if (accuracyAcceptable) {
-      hasNewGps = YES;
-      self.hasGpsFix = YES;
-      double newLatRad = gps.lat_deg * M_PI / 180.0;
-      double newLonRad = gps.lon_deg * M_PI / 180.0;
-      self.lastLatRad = newLatRad;
-      self.lastLonRad = newLonRad;
-      self.lastAltM = gps.alt_m;
-      self.lastGpsTimestampUs = gps.timestamp_us;
-      
-      [self updateMagneticDeclinationIfNeededForLatRad:self.lastLatRad
-                                                lonRad:self.lastLonRad
-                                                  altM:self.lastAltM];
-      // Update TOW with new GPS data
-      self.currentTow = (unsigned long)(gps.timestamp_us / 1000ULL);
-    } else {
-      // GPS is valid but accuracy is poor - update position state but don't
-      // update TOW This allows the filter to continue with IMU-only updates
-      // using the last good GPS TOW
-      self.hasGpsFix = YES;
-      self.lastLatRad = gps.lat_deg * M_PI / 180.0;
-      self.lastLonRad = gps.lon_deg * M_PI / 180.0;
-      self.lastAltM = gps.alt_m;
-      // Don't update lastGpsTimestampUs or TOW - keep using the last good GPS
-      // update
-      [self updateMagneticDeclinationIfNeededForLatRad:self.lastLatRad
-                                                lonRad:self.lastLonRad
-                                                  altM:self.lastAltM];
-    }
+    [self updateMagneticDeclinationIfNeededForLatRad:self.lastLatRad
+                                              lonRad:self.lastLonRad
+                                                altM:self.lastAltM];
+    // Update TOW with new GPS data
+    self.currentTow = (unsigned long)(gps.timestamp_us / 1000ULL);
   } else if (gps.valid) {
     // GPS is valid but same timestamp - keep existing GPS state
     self.hasGpsFix = YES;
@@ -292,8 +270,8 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   BOOL magAccuracyOk = (motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyMedium ||
                         motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyHigh);
   float expectedMagN_nT = magAccuracyOk ? self.expectedMagN_nT : NAN;
-  float expectedMagE_nT = magAccuracyOk ? self.expectedMagE_nT: NAN;
-  float expectedMagD_nT = magAccuracyOk ? self.expectedMagD_nT: NAN;
+  float expectedMagE_nT = magAccuracyOk ? self.expectedMagE_nT : NAN;
+  float expectedMagD_nT = magAccuracyOk ? self.expectedMagD_nT : NAN;
 
   // Update filter with sensor data and expected magnetic field from WMM
   _filter->update(dt, self.currentTow, velN, velE, velD, self.lastLatRad,

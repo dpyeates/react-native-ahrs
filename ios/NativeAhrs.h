@@ -446,29 +446,6 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
  */
 @property(nonatomic, strong) NSLock *baroLock;
 
-/* ===== Timestamp Tracking ===== */
-
-/**
- * @property lastUsedLocationTimestamp
- * @brief Timestamp (microseconds) of last GPS data fused into EKF
- *
- * Used to detect new GPS data:
- * - If locationData.timestamp != lastUsed: new data, fuse it
- * - Otherwise: stale data, skip fusion
- *
- * Prevents fusing same GPS measurement multiple times
- */
-@property(nonatomic, assign) CFTimeInterval lastUsedLocationTimestamp;
-
-/**
- * @property lastUsedBaroTimestamp
- * @brief Timestamp (microseconds) of last barometer data fused into EKF
- *
- * Same purpose as lastUsedLocationTimestamp but for barometer.
- * Prevents duplicate fusion of barometer measurements.
- */
-@property(nonatomic, assign) CFTimeInterval lastUsedBaroTimestamp;
-
 /**
  * @property waitingForInitialHeading
  * @brief Flag indicating whether we're waiting for initial heading from
