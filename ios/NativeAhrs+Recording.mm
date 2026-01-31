@@ -625,12 +625,6 @@
   self.playbackCurrentIndex = 0;
   self.currentPlaybackFilename = nil;
   
-  // Restart heading updates for reinitialization
-  if ([CLLocationManager headingAvailable]) {
-    [self.locationManager startUpdatingHeading];
-    AHRS_LOG(@"🔄 Playback ended - EKF reset, restarting heading updates");
-  }
-  
   // Reset ALL EKF state - it reflects playback data, not real device state
   // resetAhrs resets: quaternion, velocity, position, biases, wind, covariance, etc.
   // and sets filterInitialized = NO

@@ -324,6 +324,16 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
 @property(nonatomic, assign) float expectedMagD_nT;
 
 /**
+ * @property magFusionGated
+ * @brief True when magnetometer fusion is disabled due to low iOS calibration accuracy
+ *
+ * Set in sensor processing when CMMagneticFieldCalibrationAccuracy is not Medium/High.
+ * When true, filter does not receive WMM expected mag (NAN) so yaw is not corrected by mag.
+ * Useful for diagnostic logging (e.g. heading comparison).
+ */
+@property(nonatomic, assign) BOOL magFusionGated;
+
+/**
  * @property lastTimestampUs
  * @brief Timestamp (microseconds) of last sensor data processed by EKF
  *
@@ -445,44 +455,6 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
  * Note: Even though both on main queue, lock provides memory barrier
  */
 @property(nonatomic, strong) NSLock *baroLock;
-
-/**
- * @property waitingForInitialHeading
- * @brief Flag indicating whether we're waiting for initial heading from
- * CoreLocation
- *
- * Set to YES when AHRS starts to wait for CLHeading for attitude
- * initialization. Reset to NO once heading is received or filter initializes.
- */
-@property(nonatomic, assign) bool waitingForInitialHeading;
-
-/**
- * @property initialHeadingFromCL
- * @brief Initial heading value received from CoreLocation (degrees)
- *
- * Used to seed EKF attitude on startup.
- * Value of -1.0 indicates no heading received yet.
- */
-@property(nonatomic, assign) float initialHeadingFromCL;
-
-/**
- * @property latestIosHeadingDeg
- * @brief Latest magnetic heading from iOS CoreLocation (degrees [0, 360))
- *
- * Updated from CLHeading delegate callbacks.
- * Used for heading output priority (iOS heading preferred over filter yaw when
- * available).
- */
-@property(nonatomic, assign) float latestIosHeadingDeg;
-
-/**
- * @property hasIosHeading
- * @brief Flag indicating whether valid iOS CoreLocation heading is available
- *
- * Set to YES when CLHeading with acceptable accuracy is received.
- * Used to determine heading output priority.
- */
-@property(nonatomic, assign) BOOL hasIosHeading;
 
 /**
  * @property latestXPlaneHeadingDeg

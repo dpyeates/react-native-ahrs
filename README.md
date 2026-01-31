@@ -158,8 +158,7 @@ Each update provides:
 |-------|------|-------------|
 | `roll` | `number` | Roll angle (°), -180 to 180, positive = right wing down |
 | `pitch` | `number` | Pitch angle (°), -90 to 90, positive = nose up |
-| `heading` | `number` | Magnetic heading (°), 0–360 |
-| `yaw` | `number` | True heading (°), 0–360 |
+| `heading` | `number` | Magnetic heading (°), 0–360, from EKF filter (or X-Plane when connected) |
 | `magneticDeclination` | `number` | Magnetic declination (°) |
 | `groundTrack` | `number` | Direction of travel (°), 0–360 |
 | `groundSpeed` | `number` | Horizontal speed (m/s) |

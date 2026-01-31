@@ -216,13 +216,6 @@ static const float MAX_VERTICAL_ACCURACY_M = 10.0f;
       if ([CLLocationManager locationServicesEnabled]) {
         [self.locationManager startUpdatingLocation];
         AHRS_LOG(@"✅ Location permission granted - GPS updates started");
-        // Start heading updates continuously (for heading output)
-        if ([CLLocationManager headingAvailable]) {
-          [self.locationManager startUpdatingHeading];
-          AHRS_LOG(@"📍 Starting heading updates for CLHeading output");
-        } else {
-          AHRS_LOG(@"⚠️ Heading not available - will use filter yaw for heading");
-        }
       }
     } else if (status == kCLAuthorizationStatusDenied ||
                status == kCLAuthorizationStatusRestricted) {
@@ -232,14 +225,6 @@ static const float MAX_VERTICAL_ACCURACY_M = 10.0f;
     }
     // For kCLAuthorizationStatusNotDetermined, we wait for user response
   }
-}
-
-- (void)locationManager:(CLLocationManager *)manager didUpdateHeading:(CLHeading *)newHeading {
-  if (newHeading.headingAccuracy < 0) {
-    return;
-  }
-  self.latestIosHeadingDeg = (float)newHeading.magneticHeading;
-  self.hasIosHeading = YES;
 }
 
 - (BOOL)hasAcceptableGpsAccuracy:(gps_position_t)gps {

@@ -12,7 +12,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/slider": "^5.1.2",
-    "@shopify/react-native-skia": "^2.4.14",
+    "@shopify/react-native-skia": "^2.4.16",
     "react": "19.1.0",
     "react-native": "0.83.1",
     "react-native-orientation-director": "^2.6.5"
@@ -27,11 +27,11 @@
     "@react-native/babel-preset": "0.83.1",
     "@react-native/metro-config": "0.83.1",
     "@react-native/typescript-config": "0.83.1",
-    "@types/react": "^19.2.8",
+    "@types/react": "^19.2.10",
     "react-native-builder-bob": "^0.40.17",
     "react-native-monorepo-config": "^0.3.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

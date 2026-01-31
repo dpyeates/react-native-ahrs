@@ -269,6 +269,16 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   // Gate magnetometer fusion based on Core Motion calibration accuracy
   BOOL magAccuracyOk = (motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyMedium ||
                         motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyHigh);
+  self.magFusionGated = !magAccuracyOk;
+  static BOOL s_lastMagAccuracyOk = YES;
+  if (magAccuracyOk != s_lastMagAccuracyOk) {
+    if (magAccuracyOk) {
+      AHRS_LOG(@"🧭 Mag fusion resumed (iOS calibration accuracy OK)");
+    } else {
+      AHRS_LOG(@"⚠️ Mag fusion gated (iOS calibration accuracy low) - filter yaw not corrected by mag");
+    }
+    s_lastMagAccuracyOk = magAccuracyOk;
+  }
   float expectedMagN_nT = magAccuracyOk ? self.expectedMagN_nT : NAN;
   float expectedMagE_nT = magAccuracyOk ? self.expectedMagE_nT : NAN;
   float expectedMagD_nT = magAccuracyOk ? self.expectedMagD_nT : NAN;

@@ -31,30 +31,22 @@
   const double rad2deg = 180.0 / M_PI;
   double roll = _filter->getRoll_rad() * rad2deg - self.rollOffsetDeg;
   double pitch = _filter->getPitch_rad() * rad2deg - self.pitchOffsetDeg;
-  double yaw = normalizeHeadingDegrees(_filter->getHeading_rad() * rad2deg);
+  double filterHeading = normalizeHeadingDegrees(_filter->getHeading_rad() * rad2deg);
   
-  // Heading output priority:
-  // 1. X-Plane ground truth heading (when using X-Plane)
-  // 2. iOS CLHeading magnetic heading (iOS tilt-compensated, calibrated)
-  // 3. Filter true heading (fallback)
+  // Heading: X-Plane ground truth when connected, otherwise filter output
+  double rotationOffset = 0.0;
+  if (self.rotation == AhrsRotationLeft) {
+    rotationOffset = 90.0;
+  } else if (self.rotation == AhrsRotationRight) {
+    rotationOffset = -90.0;
+  }
   double heading;
   if (self.hasXPlaneHeading) {
     heading = normalizeHeadingDegrees(self.latestXPlaneHeadingDeg);
-  } else if (self.hasIosHeading) {
-    heading = normalizeHeadingDegrees(self.latestIosHeadingDeg);
-    // CLHeading is the heading of the device's top edge; adjust for device rotation.
-    double rotationOffset = 0.0;
-    if (self.rotation == AhrsRotationLeft) {
-      rotationOffset = 90.0;
-    } else if (self.rotation == AhrsRotationRight) {
-      rotationOffset = -90.0;
-    }
-    heading = normalizeHeadingDegrees(heading + rotationOffset);
   } else {
-    // Fallback: Use filter true heading if neither X-Plane nor CLHeading available
-    heading = yaw;
+    heading = normalizeHeadingDegrees(filterHeading + rotationOffset);
   }
-  
+
   double vel_n = _filter->getVelNorth_ms();
   double vel_e = _filter->getVelEast_ms();
   double vel_d = _filter->getVelDown_ms();
@@ -93,7 +85,7 @@
       self.hasValidGroundTrack = YES;
     }
   }
-  
+
   // Calculate horizontal flight path vector
   // Only output if moving faster than 1 m/s
   float horizontalFlightPathAngle = 0.0f;
@@ -162,7 +154,6 @@
     @"roll": @(roll),
     @"pitch": @(pitch),
     @"heading": @(heading),
-    @"yaw": @(yaw),
     @"magneticDeclination": @(self.magneticDeclination),
     @"groundTrack": @(track_angle),
     @"groundSpeed": @(horizontal_speed),

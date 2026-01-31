@@ -139,7 +139,6 @@ describe('AhrsSensor', () => {
         roll: 10,
         pitch: 5,
         heading: 90,
-        yaw: 88,
         magneticDeclination: 0.5,
         groundTrack: 90,
         groundSpeed: 20,

@@ -2286,13 +2286,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@commitlint/config-conventional@npm:^20.3.1":
-  version: 20.3.1
-  resolution: "@commitlint/config-conventional@npm:20.3.1"
+"@commitlint/config-conventional@npm:^20.4.0":
+  version: 20.4.0
+  resolution: "@commitlint/config-conventional@npm:20.4.0"
   dependencies:
-    "@commitlint/types": ^20.3.1
-    conventional-changelog-conventionalcommits: ^7.0.2
-  checksum: c34005d5d40a64013fa46567dbd4b9bada2100910973cd5cf169425b973718da12ab6cb9c1bb8a6f958a6b6d7a51b56ee263a39bd9385e11fe6fcfe3f161d46c
+    "@commitlint/types": ^20.4.0
+    conventional-changelog-conventionalcommits: ^9.1.0
+  checksum: 8d8fb2ac205ec50c8979978e05fdc96250afa7850f50e44264b7b8dbf57384eb148000c7f276bf60f993f010fbdcb036f7e0dc1ce7fb0fc60b2f2293889c3f12
   languageName: node
   linkType: hard
 
@@ -2460,13 +2460,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@commitlint/types@npm:^20.3.1":
-  version: 20.3.1
-  resolution: "@commitlint/types@npm:20.3.1"
+"@commitlint/types@npm:^20.4.0":
+  version: 20.4.0
+  resolution: "@commitlint/types@npm:20.4.0"
   dependencies:
-    "@types/conventional-commits-parser": ^5.0.0
-    chalk: ^5.3.0
-  checksum: 9ca85cdad3bc8604d98e71d3c0c35aca7f6e84777f6f49e5218f83b8df7f58777e6436ee1101ee72c2a776123de605086bf90372679f919ad0293d40382d1f91
+    conventional-commits-parser: ^6.2.1
+    picocolors: ^1.1.1
+  checksum: aff0e6d33eb3191fad3c20d7d46e282ae3dacca52a24f372ac880f0231c859a26726d25565246ea34b67aa9ac1db55f12ef3d635bd6fe9e68cb34fa0a7c5fe47
   languageName: node
   linkType: hard
 
@@ -2605,16 +2605,6 @@ __metadata:
     "@eslint/core": ^0.17.0
     levn: ^0.4.1
   checksum: 3f4492e02a3620e05d46126c5cfeff5f651ecf33466c8f88efb4812ae69db5f005e8c13373afabc070ecca7becd319b656d6670ad5093f05ca63c2a8841d99ba
-  languageName: node
-  linkType: hard
-
-"@evilmartians/lefthook@npm:^1.13.6":
-  version: 1.13.6
-  resolution: "@evilmartians/lefthook@npm:1.13.6"
-  bin:
-    lefthook: bin/index.js
-  checksum: 6cceca3e874015678f50818ae14a74d959816cfaba6638f8852d007332404d6819b15c71538985a3650a1ef057aa6975c17fadfe43ece7a0da1aeb9faaf02946
-  conditions: (os=darwin | os=linux | os=win32) & (cpu=x64 | cpu=arm64 | cpu=ia32)
   languageName: node
   linkType: hard
 
@@ -3938,9 +3928,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@shopify/react-native-skia@npm:^2.4.14":
-  version: 2.4.14
-  resolution: "@shopify/react-native-skia@npm:2.4.14"
+"@shopify/react-native-skia@npm:^2.4.16":
+  version: 2.4.16
+  resolution: "@shopify/react-native-skia@npm:2.4.16"
   dependencies:
     canvaskit-wasm: 0.40.0
     react-reconciler: 0.31.0
@@ -3955,7 +3945,7 @@ __metadata:
       optional: true
   bin:
     setup-skia-web: scripts/setup-canvaskit.js
-  checksum: 0b14db8fb12490d20da8576e71f96e02330fd02d981b4d37c83637b64766e4286fa755d2e412711a1803fac4860bbfece04f35fb91b1ac9a50bb7856ba52e2d7
+  checksum: 9960767c1ccb602ab96bf4f3c31202e2aa8b55d41f476066c5f63d38b4934ca9c2b3d92a1080628b9da1d3676814a223b8164965bfe097df2f084b3f89e839d6
   languageName: node
   linkType: hard
 
@@ -4180,12 +4170,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/react@npm:^19.2.8":
-  version: 19.2.8
-  resolution: "@types/react@npm:19.2.8"
+"@types/react@npm:^19.2.10":
+  version: 19.2.10
+  resolution: "@types/react@npm:19.2.10"
   dependencies:
     csstype: ^3.2.2
-  checksum: 9cff78fd1e5856eaae867a432a7de5a8d2b6a672f7a3d39a716e3fcf1432bcf17e09886102095d48ddd1b3189b2120344bc0f6ca24b5cb74d8722edf4403dbd2
+  checksum: d47df647fe594299b078a0ae0ef5bebd16969c19065986814e3cd38b1f062c7f2ae82ec90a0965fd1fb34139972a64fb87fca86f2ad88e547d718f2d3c0f68e3
   languageName: node
   linkType: hard
 
@@ -5534,15 +5524,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"conventional-changelog-conventionalcommits@npm:^7.0.2":
-  version: 7.0.2
-  resolution: "conventional-changelog-conventionalcommits@npm:7.0.2"
-  dependencies:
-    compare-func: ^2.0.0
-  checksum: e17ac5970ae09d6e9b0c3a7edaed075b836c0c09c34c514589cbe06554f46ed525067fa8150a8467cc03b1cf9af2073e7ecf48790d4f5ea399921b1cbe313711
-  languageName: node
-  linkType: hard
-
 "conventional-changelog-conventionalcommits@npm:^9.1.0":
   version: 9.1.0
   resolution: "conventional-changelog-conventionalcommits@npm:9.1.0"
@@ -5612,7 +5593,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"conventional-commits-parser@npm:^6.1.0, conventional-commits-parser@npm:^6.2.0":
+"conventional-commits-parser@npm:^6.1.0, conventional-commits-parser@npm:^6.2.0, conventional-commits-parser@npm:^6.2.1":
   version: 6.2.1
   resolution: "conventional-commits-parser@npm:6.2.1"
   dependencies:
@@ -5907,16 +5888,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"del-cli@npm:^6.0.0":
-  version: 6.0.0
-  resolution: "del-cli@npm:6.0.0"
+"del-cli@npm:^7.0.0":
+  version: 7.0.0
+  resolution: "del-cli@npm:7.0.0"
   dependencies:
-    del: ^8.0.0
-    meow: ^13.2.0
+    del: ^8.0.1
+    meow: ^14.0.0
+    presentable-error: ^0.0.1
   bin:
     del: cli.js
     del-cli: cli.js
-  checksum: 83591847823d06a68bd07daa8b92b1092c30ac02acb320b8eff1f265c6ca633657d066070320a7fd7dba3ea4993be32470d557bf33e0ce94e026ee289135eac7
+  checksum: 3554fe1f2a519a43b69d6b671eb60ab354a52de081395c2321a1cca5ca860f6a7cc1e7c3a04b23f63c4929897ef58edabf052da885232ad93f879824af148770
   languageName: node
   linkType: hard
 
@@ -5936,17 +5918,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"del@npm:^8.0.0":
-  version: 8.0.0
-  resolution: "del@npm:8.0.0"
+"del@npm:^8.0.1":
+  version: 8.0.1
+  resolution: "del@npm:8.0.1"
   dependencies:
     globby: ^14.0.2
     is-glob: ^4.0.3
     is-path-cwd: ^3.0.0
     is-path-inside: ^4.0.0
     p-map: ^7.0.2
+    presentable-error: ^0.0.1
     slash: ^5.1.0
-  checksum: 502dea7a846f989e1d921733f5d41ae4ae9b3eff168d335bfc050c9ce938ddc46198180be133814269268c4b0aed441a82fbace948c0ec5eed4ed086a4ad3b0e
+  checksum: 53ed4a379a68c90e7d6d3bcce09c49229e77de9a946d0a5fc25f45b16c950cb8665986b7d0d0423416c03bfd43e0f31e528c5a19c558fe47449be9d6fae7f846
   languageName: node
   linkType: hard
 
@@ -9319,10 +9302,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"meow@npm:^13.0.0, meow@npm:^13.2.0":
+"meow@npm:^13.0.0":
   version: 13.2.0
   resolution: "meow@npm:13.2.0"
   checksum: 79c61dc02ad448ff5c29bbaf1ef42181f1eae9947112c0e23db93e84cbc2708ecda53e54bfc6689f1e55255b2cea26840ec76e57a5773a16ca45f4fe2163ec1c
+  languageName: node
+  linkType: hard
+
+"meow@npm:^14.0.0":
+  version: 14.0.0
+  resolution: "meow@npm:14.0.0"
+  checksum: f3a5318229c2f463791282ee0f0e8b6a3ff634c80225e19313ccc5c015acc712bef0cc551e3f5039e2693bb2c1969cadd3b031e934f5fc1dfca08c95f7958a31
   languageName: node
   linkType: hard
 
@@ -10517,6 +10507,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"presentable-error@npm:^0.0.1":
+  version: 0.0.1
+  resolution: "presentable-error@npm:0.0.1"
+  checksum: 013809ee7a47ced847a8d860e9b89a56cdd8c4f1ad04ad8da1e58fd60843f77f497d204146bb15aaa9793d3b94ad8626eed01256fc9eb5839a545af2000a5fa4
+  languageName: node
+  linkType: hard
+
 "prettier-linter-helpers@npm:^1.0.1":
   version: 1.0.1
   resolution: "prettier-linter-helpers@npm:1.0.1"
@@ -10740,8 +10737,8 @@ __metadata:
     "@react-native/babel-preset": 0.83.1
     "@react-native/metro-config": 0.83.1
     "@react-native/typescript-config": 0.83.1
-    "@shopify/react-native-skia": ^2.4.14
-    "@types/react": ^19.2.8
+    "@shopify/react-native-skia": ^2.4.16
+    "@types/react": ^19.2.10
     react: 19.1.0
     react-native: 0.83.1
     react-native-builder-bob: ^0.40.17
@@ -10754,19 +10751,18 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "react-native-ahrs@workspace:."
   dependencies:
-    "@commitlint/config-conventional": ^20.3.1
+    "@commitlint/config-conventional": ^20.4.0
     "@eslint/compat": ^1.4.1
     "@eslint/eslintrc": ^3.3.3
     "@eslint/js": ^9.39.2
-    "@evilmartians/lefthook": ^1.13.6
     "@react-native-community/cli": ^20.1.1
     "@react-native/babel-preset": 0.83.1
     "@react-native/eslint-config": ^0.83.1
     "@release-it/conventional-changelog": ^10.0.4
     "@types/jest": ^29.5.14
-    "@types/react": ^19.2.8
+    "@types/react": ^19.2.10
     commitlint: ^19.8.1
-    del-cli: ^6.0.0
+    del-cli: ^7.0.0
     eslint: ^9.39.2
     eslint-config-prettier: ^10.1.8
     eslint-plugin-prettier: ^5.5.5
@@ -10776,7 +10772,7 @@ __metadata:
     react-native: 0.83.1
     react-native-builder-bob: ^0.40.17
     release-it: ^19.2.4
-    turbo: ^2.7.6
+    turbo: ^2.8.1
     typescript: ^5.9.3
   peerDependencies:
     react: "*"
@@ -12110,58 +12106,58 @@ __metadata:
   languageName: node
   linkType: hard
 
-"turbo-darwin-64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-darwin-64@npm:2.7.6"
+"turbo-darwin-64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-darwin-64@npm:2.8.1"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-darwin-arm64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-darwin-arm64@npm:2.7.6"
+"turbo-darwin-arm64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-darwin-arm64@npm:2.8.1"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"turbo-linux-64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-linux-64@npm:2.7.6"
+"turbo-linux-64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-linux-64@npm:2.8.1"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-linux-arm64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-linux-arm64@npm:2.7.6"
+"turbo-linux-arm64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-linux-arm64@npm:2.8.1"
   conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
-"turbo-windows-64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-windows-64@npm:2.7.6"
+"turbo-windows-64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-windows-64@npm:2.8.1"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"turbo-windows-arm64@npm:2.7.6":
-  version: 2.7.6
-  resolution: "turbo-windows-arm64@npm:2.7.6"
+"turbo-windows-arm64@npm:2.8.1":
+  version: 2.8.1
+  resolution: "turbo-windows-arm64@npm:2.8.1"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"turbo@npm:^2.7.6":
-  version: 2.7.6
-  resolution: "turbo@npm:2.7.6"
+"turbo@npm:^2.8.1":
+  version: 2.8.1
+  resolution: "turbo@npm:2.8.1"
   dependencies:
-    turbo-darwin-64: 2.7.6
-    turbo-darwin-arm64: 2.7.6
-    turbo-linux-64: 2.7.6
-    turbo-linux-arm64: 2.7.6
-    turbo-windows-64: 2.7.6
-    turbo-windows-arm64: 2.7.6
+    turbo-darwin-64: 2.8.1
+    turbo-darwin-arm64: 2.8.1
+    turbo-linux-64: 2.8.1
+    turbo-linux-arm64: 2.8.1
+    turbo-windows-64: 2.8.1
+    turbo-windows-arm64: 2.8.1
   dependenciesMeta:
     turbo-darwin-64:
       optional: true
@@ -12177,7 +12173,7 @@ __metadata:
       optional: true
   bin:
     turbo: bin/turbo
-  checksum: 6bbed00a353f631dc0558e3cc0d480cf63c5b930bb58ff4f93b5500d154380f35638143d42fb2aa2593d90b0a704c06ccaabcecdc11107ab69aea878231db25b
+  checksum: cbd082ea464dbb45ecd9f43e7330b57a84421b7388b7106e837bd7fca65d9aa457f1cf33bb0138581792fd75f16458950bf47006205744b24efe5603f6136a62
   languageName: node
   linkType: hard
 

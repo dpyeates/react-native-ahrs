@@ -49,7 +49,6 @@ function getInitialAttitude(): AhrsData {
     roll: 0,
     pitch: 0,
     heading: 0,
-    yaw: 0,
     magneticDeclination: 0,
     groundTrack: 0,
     groundSpeed: 0,
@@ -86,7 +85,6 @@ function createSafeData(data: AhrsData): AhrsData {
     roll: data.roll ?? 0,
     pitch: data.pitch ?? 0,
     heading: data.heading ?? 0,
-    yaw: data.yaw ?? 0,
     magneticDeclination: data.magneticDeclination ?? 0,
     groundTrack: data.groundTrack ?? 0,
     groundSpeed: data.groundSpeed ?? 0,
@@ -272,7 +270,6 @@ export default function App() {
       roll: Math.round(attitude.roll),
       pitch: Math.round(attitude.pitch),
       heading: Math.round(attitude.heading),
-      yaw: Math.round(attitude.yaw),
       flightPathAngle: (attitude.flightPathAngle ?? 0).toFixed(1),
       horizontalFlightPathAngle: (
         attitude.horizontalFlightPathAngle ?? 0
@@ -683,10 +680,6 @@ export default function App() {
           <View style={styles.dataRow}>
             <Text style={styles.dataLabel}>Heading:</Text>
             <Text style={styles.dataValue}>{roundedAttitude.heading}°</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Yaw (filter):</Text>
-            <Text style={styles.dataValue}>{roundedAttitude.yaw}°</Text>
           </View>
         </View>
 

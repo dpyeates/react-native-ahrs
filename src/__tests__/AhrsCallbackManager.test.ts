@@ -21,7 +21,6 @@ describe('AhrsCallbackManager', () => {
     roll: 0,
     pitch: 0,
     heading: 0,
-    yaw: 0,
     magneticDeclination: 0,
     groundTrack: 0,
     groundSpeed: 0,

@@ -14,8 +14,7 @@ export interface AhrsData {
   // Attitude (degrees)
   roll: number; // [-180, 180], positive = right wing down
   pitch: number; // [-90, 90], positive = nose up
-  heading: number; // [0, 360), magnetic heading from iOS CLHeading (tilt-compensated, calibrated)
-  yaw: number; // [0, 360), true heading from filter (absolute heading, not Earth relative)
+  heading: number; // [0, 360), from EKF filter (or X-Plane when connected); magnetic heading
   magneticDeclination: number; // [degrees], magnetic declination (positive = east)
   groundTrack: number; // [0, 360), horizontal direction of travel
   groundSpeed: number; // m/s, speed in horizontal plane

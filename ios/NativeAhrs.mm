@@ -91,10 +91,6 @@ RCT_EXPORT_MODULE()
     _baroCalibrated = false;
     _baroPressureOffset = 0.0f;
     
-    _waitingForInitialHeading = false;
-    _initialHeadingFromCL = -1.0f; // -1 means not yet received
-    _latestIosHeadingDeg = 0.0f;
-    _hasIosHeading = NO;
     _hasXPlaneHeading = NO;
     _latestXPlaneHeadingDeg = 0.0;
     
@@ -235,16 +231,6 @@ RCT_EXPORT_METHOD(startAhrs) {
     // Start location updates immediately
     if ([CLLocationManager locationServicesEnabled]) {
       [self.locationManager startUpdatingLocation];
-      
-      // Start heading updates continuously (for heading output to React Native)
-      if ([CLLocationManager headingAvailable]) {
-        [self.locationManager startUpdatingHeading];
-        AHRS_LOG(@"📍 Starting heading updates for CLHeading output");
-      } else {
-        // Heading not available on this device (e.g., iPad without
-        // magnetometer)
-        AHRS_LOG(@"⚠️ Heading not available - will use filter yaw for heading");
-      }
     } else {
       // Location services disabled system-wide (Settings > Privacy > Location
       // Services)
@@ -310,9 +296,8 @@ RCT_EXPORT_METHOD(startAhrs) {
  * - Stops Device Motion updates
  * - Stops barometer updates
  * - Stops GPS location updates
- * - Stops heading updates
  *
- * Resets state flags (filterInitialized, waitingForInitialHeading).
+ * Resets state flags (filterInitialized).
  * Can be restarted later with startAhrs().
  */
 RCT_EXPORT_METHOD(stopAhrs) {
@@ -322,7 +307,6 @@ RCT_EXPORT_METHOD(stopAhrs) {
   }
   
   [self.locationManager stopUpdatingLocation];
-  [self.locationManager stopUpdatingHeading];
   [self.motionManager stopDeviceMotionUpdates];
   [self.altimeter stopRelativeAltitudeUpdates];
   
@@ -330,8 +314,6 @@ RCT_EXPORT_METHOD(stopAhrs) {
   self.running = NO;
   
   self.filterInitialized = NO;
-  self.waitingForInitialHeading = false;
-  self.initialHeadingFromCL = -1.0f;
   
   AHRS_LOG(@"✅ AHRS stopped");
 }
@@ -490,14 +472,6 @@ RCT_EXPORT_METHOD(setAhrsRotation : (NSString *)newRotation) {
     AHRS_LOG(@"🔄 setAhrsRotation changed (%ld -> %ld) -> calling resetAhrs",
              (long)oldRotation, (long)self.rotation);
     [self resetAhrs];
-    
-    // Restart heading updates if AHRS is running to reinitialize attitude
-    if (self.running && [CLLocationManager locationServicesEnabled]) {
-      if ([CLLocationManager headingAvailable]) {
-        [self.locationManager startUpdatingHeading];
-        AHRS_LOG(@"🔄 Rotation changed - restarting heading updates");
-      }
-    }
   }
 }
 
