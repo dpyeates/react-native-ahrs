@@ -150,6 +150,7 @@
     flightPhaseValid = _flightPhaseDetector->isValid();
   }
   
+  int filterHealthStatus = _filter->getHealthStatus();
   [self emitOnAhrsUpdate:@{
     @"roll": @(roll),
     @"pitch": @(pitch),
@@ -175,6 +176,7 @@
     @"altitudeValid": @(self.hasGpsFix || self.baroCalibrated),
     @"positionValid": @(self.hasGpsFix),
     @"flightPhaseValid": @(flightPhaseValid),
+    @"filterHealthStatus": @(filterHealthStatus),
   }];
   
   self.nextEmitTime = timestamp + (uint64_t)(1000000.0 / self.emitRateHz);

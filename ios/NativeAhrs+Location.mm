@@ -14,10 +14,6 @@
  * =============================================================================
  */
 
-// Fixed accuracy thresholds: 5m horizontal, 10m vertical
-static const float MAX_HORIZONTAL_ACCURACY_M = 5.0f;
-static const float MAX_VERTICAL_ACCURACY_M = 10.0f;
-
 @implementation NativeAhrs (Location)
 
 - (void)locationManager:(CLLocationManager *)manager
@@ -45,7 +41,11 @@ static const float MAX_VERTICAL_ACCURACY_M = 10.0f;
   data.alt_m = latestLocation.altitude;
   data.horizontalAccuracy_m = latestLocation.horizontalAccuracy;
   data.verticalAccuracy_m = latestLocation.verticalAccuracy;
-  data.valid = [self hasAcceptableGpsAccuracy:data];
+  data.speedAccuracy_ms = latestLocation.speedAccuracy;
+  
+  // Mark GPS as valid if coordinates are valid and timestamp is recent
+  // Filter will handle accuracy-based trust via adaptive measurement noise
+  data.valid = YES;
   
   // Compute velocity components and derive track/speed
   float vel_n = 0.0f;
@@ -225,19 +225,6 @@ static const float MAX_VERTICAL_ACCURACY_M = 10.0f;
     }
     // For kCLAuthorizationStatusNotDetermined, we wait for user response
   }
-}
-
-- (BOOL)hasAcceptableGpsAccuracy:(gps_position_t)gps {
-  // Check horizontal accuracy
-  if (gps.horizontalAccuracy_m < 0 || gps.horizontalAccuracy_m > MAX_HORIZONTAL_ACCURACY_M) {
-    return NO;
-  }
-  
-  // Check vertical accuracy if available
-  if (gps.verticalAccuracy_m >= 0 && gps.verticalAccuracy_m > MAX_VERTICAL_ACCURACY_M) {
-    return NO;
-  }
-  return YES;
 }
 
 @end

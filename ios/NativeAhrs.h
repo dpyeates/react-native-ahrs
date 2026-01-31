@@ -18,7 +18,8 @@ typedef struct {
   float track_deg;
   float vs_ms;
   float horizontalAccuracy_m; // Horizontal accuracy in meters (negative = invalid)
-  float verticalAccuracy_m; // Vertical accuracy in meters (negative = invalid)
+  float verticalAccuracy_m;   // Vertical accuracy in meters (negative = invalid)
+  float speedAccuracy_ms;     // Speed accuracy in m/s (negative = invalid)
 } gps_position_t;
 
 typedef struct {

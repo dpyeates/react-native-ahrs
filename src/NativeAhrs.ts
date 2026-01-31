@@ -46,6 +46,9 @@ export interface AhrsData {
   attitudeValid: boolean; // Roll, pitch, heading are reliable
   altitudeValid: boolean; // Altitude estimates are reliable
   positionValid: boolean; // Position (lat/lon) is reliable
+
+  // Filter health (0=healthy, 1=warning, 2=error, 3=critical)
+  filterHealthStatus: number;
 }
 
 /**

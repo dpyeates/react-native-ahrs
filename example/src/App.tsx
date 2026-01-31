@@ -70,6 +70,7 @@ function getInitialAttitude(): AhrsData {
     altitudeValid: false,
     positionValid: false,
     flightPhaseValid: false,
+    filterHealthStatus: 0,
   };
 }
 
@@ -100,6 +101,7 @@ function createSafeData(data: AhrsData): AhrsData {
     velocityDown: data.velocityDown ?? 0,
     flightPhase: data.flightPhase ?? 0,
     flightPhaseConfidence: data.flightPhaseConfidence ?? 0,
+    filterHealthStatus: data.filterHealthStatus ?? 0,
   };
 }
 
@@ -636,6 +638,27 @@ export default function App() {
           <View style={styles.dataRow}>
             <Text style={styles.statusLabel}>Rate:</Text>
             <Text style={styles.statusValue}>{rate} Hz</Text>
+          </View>
+          <View style={styles.dataRow}>
+            <Text style={styles.statusLabel}>Filter health:</Text>
+            <StatusIndicator
+              color={
+                attitude.filterHealthStatus === 0
+                  ? COLORS.SUCCESS
+                  : attitude.filterHealthStatus === 1
+                    ? COLORS.WARNING
+                    : COLORS.ERROR
+              }
+              text={
+                attitude.filterHealthStatus === 0
+                  ? 'HEALTHY'
+                  : attitude.filterHealthStatus === 1
+                    ? 'WARNING'
+                    : attitude.filterHealthStatus === 2
+                      ? 'ERROR'
+                      : 'CRITICAL'
+              }
+            />
           </View>
         </View>
 

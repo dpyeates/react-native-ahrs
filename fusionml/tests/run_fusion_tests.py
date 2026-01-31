@@ -76,6 +76,12 @@ TESTS = [
         [],  # header-only
         [],
     ),
+    (
+        "unavins",
+        "test_unavins.cpp",
+        ["uNavINS.cpp", "AltitudeCalculator.cpp"],
+        [],
+    ),
 ]
 
 # -----------------------------------------------------------------------------

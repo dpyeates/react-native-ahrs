@@ -283,13 +283,30 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   float expectedMagE_nT = magAccuracyOk ? self.expectedMagE_nT : NAN;
   float expectedMagD_nT = magAccuracyOk ? self.expectedMagD_nT : NAN;
 
-  // Update filter with sensor data and expected magnetic field from WMM
+  // Get barometer data for filter fusion
+  baro_pressure_t baro;
+  [self.baroLock lock];
+  baro = self.baroData;
+  [self.baroLock unlock];
+  
+  // Prepare GPS accuracy values (negative means invalid)
+  float hacc = (gps.horizontalAccuracy_m >= 0.0f) ? gps.horizontalAccuracy_m : -1.0f;
+  float vacc = (gps.verticalAccuracy_m >= 0.0f) ? gps.verticalAccuracy_m : -1.0f;
+  float sacc = (gps.speedAccuracy_ms >= 0.0f) ? gps.speedAccuracy_ms : -1.0f;
+  
+  // Prepare barometer values (negative means invalid)
+  float baro_pressure_hpa = (baro.valid && baro.pressure_hpa > 0.0f) ? baro.pressure_hpa : -1.0f;
+  float baro_qnh_hpa = (float)self.qnh;  // QNH setting (default 1013.25 hPa)
+
+  // Update filter with sensor data, expected magnetic field, GPS accuracy, and barometer
   _filter->update(dt, self.currentTow, velN, velE, velD, self.lastLatRad,
                   self.lastLonRad, self.lastAltM, (float)body_gyro_x,
                   (float)body_gyro_y, (float)body_gyro_z, (float)body_accel_x,
                   (float)body_accel_y, (float)body_accel_z, (float)body_mag_x,
                   (float)body_mag_y, (float)body_mag_z,
-                  expectedMagN_nT, expectedMagE_nT, expectedMagD_nT);
+                  expectedMagN_nT, expectedMagE_nT, expectedMagD_nT,
+                  hacc, vacc, sacc,
+                  baro_pressure_hpa, baro_qnh_hpa);
   
   // Store latest forward acceleration for flight phase detection
   self.lastBodyAccelX = (float)body_accel_x;

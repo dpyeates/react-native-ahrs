@@ -229,7 +229,7 @@ yarn example android  # run on Android
 
 ## How it works
 
-The library runs an **18-state Extended Kalman Filter (EKF)** in C++. The state vector comprises position (NED), velocity (NED), attitude (quaternion), and sensor biases (accelerometer, gyroscope, magnetometer). The filter fuses:
+The library runs an **18-state Extended Kalman Filter (EKF)** in C++ (see `fusionml/src/uNavINS.cpp`). The state vector comprises position (NED), velocity (NED), attitude (quaternion), and sensor biases (accelerometer, gyroscope, magnetometer). The filter fuses:
 
 - **Accelerometer** – gravity for roll/pitch
 - **Gyroscope** – angular rate
@@ -238,6 +238,16 @@ The library runs an **18-state Extended Kalman Filter (EKF)** in C++. The state 
 - **Barometer** – altitude (QNE/QNH)
 
 Updates are produced at up to 60 Hz internally; you choose the JS output rate (1–60 Hz) via `setRate`. Magnetic declination is derived from position using the [World Magnetic Model](https://www.ncei.noaa.gov/products/world-magnetic-model) (WMM) via [XYZgeomag](https://github.com/nhz2/XYZgeomag).
+
+### Filter architecture
+
+The filter is an **18-state Extended Kalman Filter** in the North–East–Down (NED) frame. The **state** comprises position (3), velocity (3), attitude as Euler angles roll/pitch/yaw (3), and bias states for the accelerometer (3), gyroscope (3), and magnetometer (3). Attitude is propagated internally using a quaternion; the state holds the equivalent Euler angles for the correction step.
+
+**Prediction** runs at the IMU rate (e.g. 60 Hz). The process model integrates specific force and angular rate from the IMU to propagate position, velocity, and attitude. Gravity is applied in the navigation frame. The three bias states are modelled as first-order Markov processes with configurable time constants, so the filter can learn and track sensor biases over time. **Rest detection** runs on the raw IMU: when the device is stationary (low gyro and accel variance over about 1 s), the gyro bias time constant is shortened and process noise increased so bias converges much faster; when motion is detected again, the filter returns to normal time constants. IMU samples are also written into a short buffer for **sensor delay compensation**: GPS is typically 100–300 ms behind the IMU, so the filter estimates delay from the GPS update rate (0.5–10 Hz) and scales GPS measurement noise by that delay so stale fixes are trusted less (no state rewind).
+
+**Measurements** are applied when available. **GPS** provides position and velocity (6 dimensions) in NED; the observation is the difference between GPS and filter state. The measurement noise (R) is **adaptive**: if the platform reports horizontal, vertical, or speed accuracy, the filter uses the larger of nominal or reported accuracy so that poor GPS is trusted less and good GPS uses nominal R, giving smooth behaviour from open sky to urban or degraded conditions. Delay scaling is applied on top of that. **Magnetometer** updates observe only heading (yaw): the expected Earth field in body frame is computed from the current attitude and the WMM expected field in NED; the measured field (after subtracting the estimated mag bias) is compared to that expectation to form a yaw error, which is used in a scalar update. Before accepting a mag update, the filter applies **enhanced magnetic rejection**: the measured field must pass a magnitude check (0.5–2× expected strength), an inclination check (within about ±20° of expected dip), and a temporal check (no sudden change &gt; 10 µT), so power lines, metal, and transients are rejected while a clean field is accepted. **Barometer** altitude is fused as a separate scalar measurement when GPS vertical accuracy is poor or unavailable (&gt;10 m or no fix), giving a backup altitude and smoother behaviour in urban or tree cover; QNH is user-set, with QNE as fallback.
+
+**Covariance** is updated using the Joseph form for numerical stability, and the state transition and observation Jacobians are computed analytically. The filter also performs **covariance health monitoring**: it checks for NaN/Inf in the state and covariance, enforces reasonable bounds on position, velocity, and attitude variances (with separate handling for yaw, which can be large without mag), and checks that bias estimates stay within physical limits; it exposes `isHealthy()` and `getHealthStatus()` (0=healthy, 1=warning, 2=error, 3=critical) for diagnostics or optional reset logic. The result is attitude (roll, pitch, heading), position (lat/lon/alt), velocity (NED and derived ground speed/track), and the bias estimates, which are used to correct the raw IMU and mag inputs on the next step.
 
 ## Troubleshooting
 
@@ -258,10 +268,7 @@ See [`fusionml/tests/README.md`](fusionml/tests/README.md) for fusion test detai
 
 ## Attribution
 
-This project uses or draws from the following open-source work:
-
-- **[XYZgeomag](https://github.com/nhz2/XYZgeomag)** ([MIT](https://opensource.org/licenses/MIT)) — Lightweight C++ header-only library for the World Magnetic Model (WMM). Used to compute magnetic declination from position. Compatible with WMM2025.
-- **[uNavINS](https://github.com/FlyTheThings/uNavINS)** — Inertial navigation EKF (originally 15-state) for attitude, position, and velocity from IMU and GPS. This library uses modified, **18-state Extended Kalman Filter (EKF)** based on the uNav INS approach, extended with magnetometer bias states and full 3D magnetometer fusion.
+This project uses **[XYZgeomag](https://github.com/nhz2/XYZgeomag)** ([MIT](https://opensource.org/licenses/MIT)) for the World Magnetic Model (WMM), and builds on **[uNavINS](https://github.com/FlyTheThings/uNavINS)** for the core inertial/GPS EKF. The filter has been extended from the original 15-state design to an 18-state formulation with magnetometer fusion, and we have added sensor delay compensation, GPS adaptive noise, enhanced magnetic rejection, rest detection, covariance health monitoring, and barometer fusion so that it behaves well with variable GPS quality, magnetic interference, and stationary periods. The base uNavINS propagation and fusion logic is preserved.
 
 ## Contributing
 
