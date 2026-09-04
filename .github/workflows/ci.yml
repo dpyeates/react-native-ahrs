@@ -93,6 +93,8 @@ jobs:
       - name: Finalize Android SDK
         if: env.turbo_cache_hit != 1
         run: |
+          test -n "$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > example/android/local.properties
           /bin/bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null"
 
       - name: Cache Gradle
@@ -113,9 +115,10 @@ jobs:
           yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
   build-ios:
-    runs-on: macos-latest
+    # macos-latest is Xcode 26-only; RN 0.83 still builds with Xcode 16.x
+    runs-on: macos-15
     env:
-      XCODE_VERSION: 16.2
+      XCODE_VERSION: '16.4'
       TURBO_CACHE_DIR: .turbo/ios
     steps:
       - name: Checkout
