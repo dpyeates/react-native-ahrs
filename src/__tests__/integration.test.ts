@@ -512,7 +512,11 @@ describe('AHRS Integration Tests', () => {
     it('should handle getRecordingFiles', async () => {
       const mockFiles = [
         { filename: 'flight1.json.gz', size: 1024, date: Date.now() },
-        { filename: 'flight2.json.gz', size: 2048, date: Date.now() - 86400000 },
+        {
+          filename: 'flight2.json.gz',
+          size: 2048,
+          date: Date.now() - 86400000,
+        },
       ];
       (NativeAhrs.getRecordingFiles as jest.Mock).mockResolvedValue(mockFiles);
 

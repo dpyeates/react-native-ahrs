@@ -321,7 +321,6 @@ describe('AhrsSensor', () => {
     });
   });
 
-
   describe('setQNH', () => {
     it('should call native setQNH', () => {
       Ahrs.setQNH(1013.25);
