@@ -38,6 +38,12 @@ jobs:
       - name: Run unit tests
         run: yarn test --maxWorkers=2 --coverage
 
+      - name: Run fusionml C++ tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ zlib1g-dev
+          yarn test:fusion
+
   build-library:
     runs-on: ubuntu-latest
     steps:
@@ -87,7 +93,16 @@ jobs:
       - name: Finalize Android SDK
         if: env.turbo_cache_hit != 1
         run: |
-          /bin/bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null"
+          test -n "$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > example/android/local.properties
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          # RN 0.83 pins NDK 27.1; install it here so Gradle does not download a bad zip
+          for attempt in 1 2 3; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.1.12297006" && break
+            echo "NDK install attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 8))
+          done
+          test -d "$ANDROID_HOME/ndk/27.1.12297006"
 
       - name: Cache Gradle
         if: env.turbo_cache_hit != 1
@@ -107,9 +122,10 @@ jobs:
           yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
   build-ios:
-    runs-on: macos-latest
+    # macos-latest is Xcode 26-only; RN 0.83 still builds with Xcode 16.x
+    runs-on: macos-15
     env:
-      XCODE_VERSION: 16.2
+      XCODE_VERSION: '16.4'
       TURBO_CACHE_DIR: .turbo/ios
     steps:
       - name: Checkout
@@ -146,7 +162,7 @@ jobs:
           cd example
           bundle install
           bundle exec pod repo update --verbose
-          bundle exec pod install --project-directory=ios
+          bundle exec pod update --project-directory=ios
 
       - name: Build example for iOS
         run: |

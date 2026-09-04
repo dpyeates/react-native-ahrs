@@ -4,6 +4,7 @@
  * Main application component for the React Native AHRS example app.
  * Provides a user interface for:
  * - Displaying real-time aircraft attitude and navigation data
+ * - Filter health, IMU rest, and ZUPT status
  * - Controlling AHRS settings (rate, QNH, orientation)
  * - Recording and playback of flight data
  * - X-Plane flight simulator integration
@@ -71,6 +72,8 @@ function getInitialAttitude(): AhrsData {
     positionValid: false,
     flightPhaseValid: false,
     filterHealthStatus: 0,
+    atRest: false,
+    zuptActive: false,
   };
 }
 
@@ -102,6 +105,12 @@ function createSafeData(data: AhrsData): AhrsData {
     flightPhase: data.flightPhase ?? 0,
     flightPhaseConfidence: data.flightPhaseConfidence ?? 0,
     filterHealthStatus: data.filterHealthStatus ?? 0,
+    attitudeValid: data.attitudeValid ?? false,
+    altitudeValid: data.altitudeValid ?? false,
+    positionValid: data.positionValid ?? false,
+    flightPhaseValid: data.flightPhaseValid ?? false,
+    atRest: data.atRest ?? false,
+    zuptActive: data.zuptActive ?? false,
   };
 }
 
@@ -186,15 +195,16 @@ export default function App() {
   const [xplaneHost, setXplaneHost] = useState<string>('');
   const [xplaneConnected, setXplaneConnected] = useState<boolean>(false);
   const [xplaneConnecting, setXplaneConnecting] = useState<boolean>(false);
-  
+
   // Handle IP address input with filtering
   const handleXPlaneHostChange = (text: string) => {
     const filtered = filterIPv4Input(text);
     setXplaneHost(filtered);
   };
-  
+
   // Check if current IP address is valid
-  const isXPlaneHostValid = xplaneHost.trim() !== '' && isValidIPv4(xplaneHost.trim());
+  const isXPlaneHostValid =
+    xplaneHost.trim() !== '' && isValidIPv4(xplaneHost.trim());
 
   // Load saved X-Plane host on mount
   useEffect(() => {
@@ -267,11 +277,16 @@ export default function App() {
    * Rounds and formats attitude values for display.
    * Angles are rounded to integers, speeds/altitudes to 1 decimal place.
    */
-  const roundedAttitude = useMemo(
-    () => ({
+  const roundedAttitude = useMemo(() => {
+    const magneticHeading = attitude.heading ?? 0;
+    const declination = attitude.magneticDeclination ?? 0;
+    const trueHeading = (((magneticHeading + declination) % 360) + 360) % 360;
+    return {
       roll: Math.round(attitude.roll),
       pitch: Math.round(attitude.pitch),
-      heading: Math.round(attitude.heading),
+      heading: Math.round(magneticHeading),
+      trueHeading: Math.round(trueHeading),
+      groundTrack: Math.round(attitude.groundTrack ?? 0),
       flightPathAngle: (attitude.flightPathAngle ?? 0).toFixed(1),
       horizontalFlightPathAngle: (
         attitude.horizontalFlightPathAngle ?? 0
@@ -279,9 +294,11 @@ export default function App() {
       altitudeQNE: Math.round(attitude.altitudeQNE),
       altitudeQNH: Math.round(attitude.altitudeQNH),
       verticalSpeed: (attitude.verticalSpeed ?? 0).toFixed(1),
-    }),
-    [attitude]
-  );
+      velocityNorth: (attitude.velocityNorth ?? 0).toFixed(1),
+      velocityEast: (attitude.velocityEast ?? 0).toFixed(1),
+      velocityDown: (attitude.velocityDown ?? 0).toFixed(1),
+    };
+  }, [attitude]);
 
   const listenerUnsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -560,7 +577,7 @@ export default function App() {
       Alert.alert('Invalid IP Address', 'Please enter a valid IPv4 address.');
       return;
     }
-    
+
     if (!isValidIPv4(host)) {
       Alert.alert(
         'Invalid IP Address',
@@ -568,7 +585,7 @@ export default function App() {
       );
       return;
     }
-    
+
     // Save the host for next time
     AsyncStorage.setItem(XPLANE_HOST_STORAGE_KEY, host).catch((error) => {
       console.warn('Failed to save X-Plane host:', error);
@@ -601,6 +618,7 @@ export default function App() {
           heading: attitude.heading,
           flightPathAngle: attitude.flightPathAngle ?? 0,
           horizontalFlightPathAngle: attitude.horizontalFlightPathAngle ?? 0,
+          attitudeValid: attitude.attitudeValid,
         }}
       />
       <KeyboardAvoidingView
@@ -615,535 +633,586 @@ export default function App() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-        {/* Status Section */}
-        <View style={styles.statusSection}>
-          <Text style={styles.sectionTitle}>Status</Text>
-          <View style={styles.dataRow}>
-            <Text style={styles.statusLabel}>Data Source:</Text>
-            <Text
-              style={[
-                styles.statusValue,
-                {
-                  color: xplaneConnected ? COLORS.PURPLE : COLORS.TEXT_PRIMARY,
-                },
-              ]}
-            >
-              {xplaneConnected ? 'X-Plane' : 'Device Sensors'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.statusLabel}>Orientation:</Text>
-            <Text style={styles.statusValue}>{rotationString}</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.statusLabel}>Rate:</Text>
-            <Text style={styles.statusValue}>{rate} Hz</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.statusLabel}>Filter health:</Text>
-            <StatusIndicator
-              color={
-                attitude.filterHealthStatus === 0
-                  ? COLORS.SUCCESS
-                  : attitude.filterHealthStatus === 1
-                    ? COLORS.WARNING
-                    : COLORS.ERROR
-              }
-              text={
-                attitude.filterHealthStatus === 0
-                  ? 'HEALTHY'
-                  : attitude.filterHealthStatus === 1
-                    ? 'WARNING'
-                    : attitude.filterHealthStatus === 2
-                      ? 'ERROR'
-                      : 'CRITICAL'
-              }
-            />
-          </View>
-        </View>
-
-        {/* Flight Phase Section */}
-        <View style={styles.dataSection}>
-          <Text style={styles.sectionTitle}>Flight Phase</Text>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Valid:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.flightPhaseValid ? 'TRUE' : 'FALSE'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Phase:</Text>
-            <Text style={styles.dataValue}>{flightPhaseString}</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Confidence:</Text>
-            <Text style={styles.dataValue}>
-              {flightPhaseConfidencePercent}%
-            </Text>
-          </View>
-        </View>
-
-        {/* Attitude Section */}
-        <View style={styles.dataSection}>
-          <Text style={styles.sectionTitle}>Attitude</Text>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Valid:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.attitudeValid ? 'TRUE' : 'FALSE'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Roll:</Text>
-            <Text style={styles.dataValue}>{roundedAttitude.roll}°</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Pitch:</Text>
-            <Text style={styles.dataValue}>{roundedAttitude.pitch}°</Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Heading:</Text>
-            <Text style={styles.dataValue}>{roundedAttitude.heading}°</Text>
-          </View>
-        </View>
-
-        {/* Altitude Section */}
-        <View style={styles.dataSection}>
-          <Text style={styles.sectionTitle}>Altitude</Text>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Valid:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.altitudeValid ? 'TRUE' : 'FALSE'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>V/S:</Text>
-            <Text style={styles.dataValue}>
-              {roundedAttitude.verticalSpeed} m/s
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>GPS:</Text>
-            <Text style={styles.dataValue}>
-              {Math.round(attitude.altitude)} m
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>QNE:</Text>
-            <Text style={styles.dataValue}>
-              {roundedAttitude.altitudeQNE} m
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>QNH:</Text>
-            <Text style={styles.dataValue}>
-              {roundedAttitude.altitudeQNH} m
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Baro Pressure:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.barometricPressure > 0
-                ? `${attitude.barometricPressure.toFixed(1)} hPa`
-                : 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>QNH Pressure:</Text>
-            <Text style={styles.dataValue}>{qnh.toFixed(1)} hPa</Text>
-          </View>
-          <View style={styles.sliderContainer}>
-            <View style={styles.sliderLabelRow}>
-              <Text style={styles.sliderLabel}>{QNH_MIN}</Text>
-              <Text style={styles.sliderLabel}>{QNH_MAX}</Text>
-            </View>
-            <Slider
-              style={styles.slider}
-              minimumValue={QNH_MIN}
-              maximumValue={QNH_MAX}
-              value={qnh}
-              onValueChange={handleQnhChange}
-              step={0.1}
-              minimumTrackTintColor="#007AFF"
-              maximumTrackTintColor={COLORS.BORDER}
-              thumbTintColor="#007AFF"
-            />
-          </View>
-        </View>
-
-        {/* Positional Data Section */}
-        <View style={styles.dataSection}>
-          <Text style={styles.sectionTitle}>Positional Data</Text>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Valid:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.positionValid ? 'TRUE' : 'FALSE'}
-            </Text>
-          </View>
-          {attitude.latitude !== undefined &&
-            attitude.longitude !== undefined && (
-              <>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Latitude:</Text>
-                  <Text style={styles.dataValue}>
-                    {(attitude.latitude ?? 0).toFixed(6)}°
-                  </Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Longitude:</Text>
-                  <Text style={styles.dataValue}>
-                    {(attitude.longitude ?? 0).toFixed(6)}°
-                  </Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Mag Declination:</Text>
-                  <Text style={styles.dataValue}>
-                    {attitude.magneticDeclination >= 0 ? '+' : ''}
-                    {attitude.magneticDeclination.toFixed(1)}°
-                  </Text>
-                </View>
-              </>
-            )}
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Ground Speed:</Text>
-            <Text style={styles.dataValue}>
-              {(attitude.groundSpeed ?? 0).toFixed(1)} m/s
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Vertical FPA:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.flightPathAngle !== undefined
-                ? `${attitude.flightPathAngle >= 0 ? '+' : ''}${roundedAttitude.flightPathAngle}°`
-                : 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.dataRow}>
-            <Text style={styles.dataLabel}>Horizontal FPA:</Text>
-            <Text style={styles.dataValue}>
-              {attitude.horizontalFlightPathAngle !== undefined
-                ? `${attitude.horizontalFlightPathAngle >= 0 ? '+' : ''}${roundedAttitude.horizontalFlightPathAngle}°`
-                : 'N/A'}
-            </Text>
-          </View>
-        </View>
-
-        {/* X-Plane Connection Section */}
-        <View style={styles.dataSection}>
-          <Text style={styles.sectionTitle}>X-Plane Connection</Text>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>Status:</Text>
-            <StatusIndicator
-              color={
-                xplaneConnected
-                  ? COLORS.SUCCESS
-                  : xplaneConnecting
-                    ? COLORS.WARNING
-                    : COLORS.TEXT_SECONDARY
-              }
-              text={
-                xplaneConnected
-                  ? 'CONNECTED'
-                  : xplaneConnecting
-                    ? 'CONNECTING...'
-                    : 'DISCONNECTED'
-              }
-            />
-          </View>
-          {xplaneConnected && (
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Host:</Text>
-              <Text style={styles.statusValue}>{xplaneHost}</Text>
-            </View>
-          )}
-          {!xplaneConnected && (
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.textInput}
-                placeholder="X-Plane IP (e.g., 192.168.1.100)"
-                placeholderTextColor="#999"
-                value={xplaneHost}
-                onChangeText={handleXPlaneHostChange}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
-                returnKeyType="done"
-                onSubmitEditing={handleXPlaneConnect}
-                editable={!xplaneConnecting}
-                blurOnSubmit={true}
-              />
-            </View>
-          )}
-          {!xplaneConnected ? (
-            <TouchableHighlight
-              onPress={handleXPlaneConnect}
-              underlayColor="#e0e0e0"
-              style={styles.buttonWrapper}
-              disabled={xplaneConnecting || !isXPlaneHostValid}
-            >
-              <View
+          {/* Status Section */}
+          <View style={styles.statusSection}>
+            <Text style={styles.sectionTitle}>Status</Text>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>Data Source:</Text>
+              <Text
                 style={[
-                  styles.button,
+                  styles.statusValue,
                   {
-                    backgroundColor:
-                      xplaneConnecting || !isXPlaneHostValid
-                        ? COLORS.DISABLED
-                        : COLORS.PURPLE,
+                    color: xplaneConnected
+                      ? COLORS.PURPLE
+                      : COLORS.TEXT_PRIMARY,
                   },
                 ]}
               >
-                <Text style={styles.buttonText}>
-                  {xplaneConnecting ? 'Connecting...' : 'Connect to X-Plane'}
-                </Text>
-              </View>
-            </TouchableHighlight>
-          ) : (
-            <TouchableHighlight
-              onPress={handleXPlaneDisconnect}
-              underlayColor="#e0e0e0"
-              style={styles.buttonWrapper}
-            >
-              <View style={[styles.button, { backgroundColor: COLORS.PURPLE }]}>
-                <Text style={styles.buttonText}>Disconnect from X-Plane</Text>
-              </View>
-            </TouchableHighlight>
-          )}
-        </View>
-
-        {/* Controls Section */}
-        <View style={styles.controlsSection}>
-          <TouchableHighlight
-            onPress={handleRotatePress}
-            accessibilityLabel="Rotate orientation"
-            accessibilityRole="button"
-            style={styles.buttonWrapper}
-          >
-            <View style={styles.button}>
-              <Text style={styles.buttonText}>Rotate</Text>
+                {xplaneConnected ? 'X-Plane' : 'Device Sensors'}
+              </Text>
             </View>
-          </TouchableHighlight>
-
-          <View style={styles.buttonRow}>
-            <TouchableHighlight
-              onPress={handleLevelPress}
-              underlayColor="#e0e0e0"
-              accessibilityLabel="Level the AHRS system"
-              accessibilityRole="button"
-              style={styles.buttonWrapper}
-            >
-              <View style={styles.button}>
-                <Text style={styles.buttonText}>Level</Text>
-              </View>
-            </TouchableHighlight>
-            <TouchableHighlight
-              onPress={() => Ahrs.reset()}
-              underlayColor="#e0e0e0"
-              style={styles.buttonWrapper}
-            >
-              <View style={styles.button}>
-                <Text style={styles.buttonText}>Reset</Text>
-              </View>
-            </TouchableHighlight>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>Orientation:</Text>
+              <Text style={styles.statusValue}>{rotationString}</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>Rate:</Text>
+              <Text style={styles.statusValue}>{rate} Hz</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>Filter health:</Text>
+              <StatusIndicator
+                color={
+                  attitude.filterHealthStatus === 0
+                    ? COLORS.SUCCESS
+                    : attitude.filterHealthStatus === 1
+                      ? COLORS.WARNING
+                      : COLORS.ERROR
+                }
+                text={
+                  attitude.filterHealthStatus === 0
+                    ? 'HEALTHY'
+                    : attitude.filterHealthStatus === 1
+                      ? 'WARNING'
+                      : attitude.filterHealthStatus === 2
+                        ? 'ERROR'
+                        : 'CRITICAL'
+                }
+              />
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>IMU rest:</Text>
+              <StatusIndicator
+                color={attitude.atRest ? COLORS.SUCCESS : COLORS.TEXT_SECONDARY}
+                text={attitude.atRest ? 'AT REST' : 'MOVING'}
+              />
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.statusLabel}>ZUPT:</Text>
+              <StatusIndicator
+                color={
+                  attitude.zuptActive ? COLORS.PRIMARY : COLORS.TEXT_SECONDARY
+                }
+                text={attitude.zuptActive ? 'ACTIVE' : 'OFF'}
+              />
+            </View>
           </View>
 
-          {/* Recording Controls */}
+          {/* Flight Phase Section */}
           <View style={styles.dataSection}>
-            <Text style={styles.sectionTitle}>Recording</Text>
-            {!isRecording ? (
+            <Text style={styles.sectionTitle}>Flight Phase</Text>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Valid:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.flightPhaseValid ? 'TRUE' : 'FALSE'}
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Phase:</Text>
+              <Text style={styles.dataValue}>{flightPhaseString}</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Confidence:</Text>
+              <Text style={styles.dataValue}>
+                {flightPhaseConfidencePercent}%
+              </Text>
+            </View>
+          </View>
+
+          {/* Attitude Section */}
+          <View style={styles.dataSection}>
+            <Text style={styles.sectionTitle}>Attitude</Text>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Valid:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.attitudeValid ? 'TRUE' : 'FALSE'}
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Roll:</Text>
+              <Text style={styles.dataValue}>{roundedAttitude.roll}°</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Pitch:</Text>
+              <Text style={styles.dataValue}>{roundedAttitude.pitch}°</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Heading (mag):</Text>
+              <Text style={styles.dataValue}>{roundedAttitude.heading}°</Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Heading (true):</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.trueHeading}°
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Ground Track:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.groundTrack}°
+              </Text>
+            </View>
+          </View>
+
+          {/* Altitude Section */}
+          <View style={styles.dataSection}>
+            <Text style={styles.sectionTitle}>Altitude</Text>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Valid:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.altitudeValid ? 'TRUE' : 'FALSE'}
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>V/S:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.verticalSpeed} m/s
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>GPS:</Text>
+              <Text style={styles.dataValue}>
+                {Math.round(attitude.altitude)} m
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>QNE:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.altitudeQNE} m
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>QNH:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.altitudeQNH} m
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Baro Pressure:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.barometricPressure > 0
+                  ? `${attitude.barometricPressure.toFixed(1)} hPa`
+                  : 'N/A'}
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>QNH Pressure:</Text>
+              <Text style={styles.dataValue}>{qnh.toFixed(1)} hPa</Text>
+            </View>
+            <View style={styles.sliderContainer}>
+              <View style={styles.sliderLabelRow}>
+                <Text style={styles.sliderLabel}>{QNH_MIN}</Text>
+                <Text style={styles.sliderLabel}>{QNH_MAX}</Text>
+              </View>
+              <Slider
+                style={styles.slider}
+                minimumValue={QNH_MIN}
+                maximumValue={QNH_MAX}
+                value={qnh}
+                onValueChange={handleQnhChange}
+                step={0.1}
+                minimumTrackTintColor="#007AFF"
+                maximumTrackTintColor={COLORS.BORDER}
+                thumbTintColor="#007AFF"
+              />
+            </View>
+          </View>
+
+          {/* Positional Data Section */}
+          <View style={styles.dataSection}>
+            <Text style={styles.sectionTitle}>Positional Data</Text>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Valid:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.positionValid ? 'TRUE' : 'FALSE'}
+              </Text>
+            </View>
+            {attitude.latitude !== undefined &&
+              attitude.longitude !== undefined && (
+                <>
+                  <View style={styles.dataRow}>
+                    <Text style={styles.dataLabel}>Latitude:</Text>
+                    <Text style={styles.dataValue}>
+                      {(attitude.latitude ?? 0).toFixed(6)}°
+                    </Text>
+                  </View>
+                  <View style={styles.dataRow}>
+                    <Text style={styles.dataLabel}>Longitude:</Text>
+                    <Text style={styles.dataValue}>
+                      {(attitude.longitude ?? 0).toFixed(6)}°
+                    </Text>
+                  </View>
+                  <View style={styles.dataRow}>
+                    <Text style={styles.dataLabel}>Mag Declination:</Text>
+                    <Text style={styles.dataValue}>
+                      {attitude.magneticDeclination >= 0 ? '+' : ''}
+                      {attitude.magneticDeclination.toFixed(1)}°
+                    </Text>
+                  </View>
+                </>
+              )}
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Ground Speed:</Text>
+              <Text style={styles.dataValue}>
+                {(attitude.groundSpeed ?? 0).toFixed(1)} m/s
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Ground Track:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.groundTrack}°
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Vel N/E/D:</Text>
+              <Text style={styles.dataValue}>
+                {roundedAttitude.velocityNorth} / {roundedAttitude.velocityEast}{' '}
+                / {roundedAttitude.velocityDown} m/s
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Vertical FPA:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.flightPathAngle !== undefined
+                  ? `${attitude.flightPathAngle >= 0 ? '+' : ''}${roundedAttitude.flightPathAngle}°`
+                  : 'N/A'}
+              </Text>
+            </View>
+            <View style={styles.dataRow}>
+              <Text style={styles.dataLabel}>Horizontal FPA:</Text>
+              <Text style={styles.dataValue}>
+                {attitude.horizontalFlightPathAngle !== undefined
+                  ? `${attitude.horizontalFlightPathAngle >= 0 ? '+' : ''}${roundedAttitude.horizontalFlightPathAngle}°`
+                  : 'N/A'}
+              </Text>
+            </View>
+          </View>
+
+          {/* X-Plane Connection Section */}
+          <View style={styles.dataSection}>
+            <Text style={styles.sectionTitle}>X-Plane Connection</Text>
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Status:</Text>
+              <StatusIndicator
+                color={
+                  xplaneConnected
+                    ? COLORS.SUCCESS
+                    : xplaneConnecting
+                      ? COLORS.WARNING
+                      : COLORS.TEXT_SECONDARY
+                }
+                text={
+                  xplaneConnected
+                    ? 'CONNECTED'
+                    : xplaneConnecting
+                      ? 'CONNECTING...'
+                      : 'DISCONNECTED'
+                }
+              />
+            </View>
+            {xplaneConnected && (
+              <View style={styles.statusRow}>
+                <Text style={styles.statusLabel}>Host:</Text>
+                <Text style={styles.statusValue}>{xplaneHost}</Text>
+              </View>
+            )}
+            {!xplaneConnected && (
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="X-Plane IP (e.g., 192.168.1.100)"
+                  placeholderTextColor="#999"
+                  value={xplaneHost}
+                  onChangeText={handleXPlaneHostChange}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType={
+                    Platform.OS === 'ios'
+                      ? 'numbers-and-punctuation'
+                      : 'default'
+                  }
+                  returnKeyType="done"
+                  onSubmitEditing={handleXPlaneConnect}
+                  editable={!xplaneConnecting}
+                  blurOnSubmit={true}
+                />
+              </View>
+            )}
+            {!xplaneConnected ? (
               <TouchableHighlight
-                onPress={handleStartRecording}
+                onPress={handleXPlaneConnect}
                 underlayColor="#e0e0e0"
                 style={styles.buttonWrapper}
-                disabled={isPlaying}
+                disabled={xplaneConnecting || !isXPlaneHostValid}
               >
                 <View
                   style={[
                     styles.button,
                     {
-                      backgroundColor: isPlaying
-                        ? COLORS.DISABLED
-                        : COLORS.ERROR,
+                      backgroundColor:
+                        xplaneConnecting || !isXPlaneHostValid
+                          ? COLORS.DISABLED
+                          : COLORS.PURPLE,
                     },
                   ]}
                 >
-                  <Text style={styles.buttonText}>Start Recording</Text>
+                  <Text style={styles.buttonText}>
+                    {xplaneConnecting ? 'Connecting...' : 'Connect to X-Plane'}
+                  </Text>
                 </View>
               </TouchableHighlight>
             ) : (
-              <View>
-                <View style={styles.statusRow}>
-                  <Text style={styles.statusLabel}>Recording:</Text>
-                  <StatusIndicator color={COLORS.ERROR} text="ACTIVE" />
-                </View>
-                <TouchableHighlight
-                  onPress={handleStopRecording}
-                  underlayColor="#e0e0e0"
-                  style={styles.buttonWrapper}
-                >
-                  <View
-                    style={[styles.button, { backgroundColor: COLORS.ERROR }]}
-                  >
-                    <Text style={styles.buttonText}>Stop Recording</Text>
-                  </View>
-                </TouchableHighlight>
-              </View>
-            )}
-          </View>
-
-          {/* Playback Controls */}
-          {isPlaying && (
-            <View style={styles.dataSection}>
-              <Text style={styles.sectionTitle}>Playback</Text>
-              <View style={styles.statusRow}>
-                <Text style={styles.statusLabel}>Playing:</Text>
-                <StatusIndicator color={COLORS.SUCCESS} text="ACTIVE" />
-              </View>
               <TouchableHighlight
-                onPress={handleStopPlayback}
+                onPress={handleXPlaneDisconnect}
                 underlayColor="#e0e0e0"
                 style={styles.buttonWrapper}
               >
                 <View
-                  style={[styles.button, { backgroundColor: COLORS.SUCCESS }]}
+                  style={[styles.button, { backgroundColor: COLORS.PURPLE }]}
                 >
-                  <Text style={styles.buttonText}>Stop Playback</Text>
+                  <Text style={styles.buttonText}>Disconnect from X-Plane</Text>
                 </View>
               </TouchableHighlight>
-            </View>
-          )}
-
-          {/* File Explorer */}
-          <View style={styles.dataSection}>
-            <Text style={styles.sectionTitle}>Recordings</Text>
-            <TouchableHighlight
-              onPress={loadRecordingFiles}
-              underlayColor="#e0e0e0"
-              style={styles.buttonWrapper}
-            >
-              <View
-                style={[
-                  styles.button,
-                  { backgroundColor: COLORS.PRIMARY, padding: 10 },
-                ]}
-              >
-                <Text style={styles.buttonText}>Refresh</Text>
-              </View>
-            </TouchableHighlight>
-            {recordingFiles.length === 0 ? (
-              <Text style={styles.dataLabel}>No recordings found</Text>
-            ) : (
-              recordingFiles.map((file) => (
-                <View key={file.filename} style={styles.fileRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.dataLabel}>{file.filename}</Text>
-                    <Text
-                      style={[
-                        styles.dataValue,
-                        { fontSize: 12, fontWeight: '400' },
-                      ]}
-                    >
-                      {(file.size / 1024).toFixed(1)} KB •{' '}
-                      {new Date(file.date).toLocaleString()}
-                    </Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableHighlight
-                      onPress={() => handlePlayback(file.filename)}
-                      underlayColor="#e0e0e0"
-                      disabled={isRecording || isPlaying}
-                      style={{ borderRadius: 6 }}
-                    >
-                      <View
-                        style={[
-                          styles.smallButton,
-                          {
-                            backgroundColor:
-                              isRecording || isPlaying
-                                ? COLORS.DISABLED
-                                : COLORS.SUCCESS,
-                          },
-                        ]}
-                      >
-                        <Text style={styles.smallButtonText}>Play</Text>
-                      </View>
-                    </TouchableHighlight>
-                    <TouchableHighlight
-                      onPress={() => handleDeleteRecording(file.filename)}
-                      underlayColor="#e0e0e0"
-                      disabled={isRecording || isPlaying}
-                      style={{ borderRadius: 6 }}
-                    >
-                      <View
-                        style={[
-                          styles.smallButton,
-                          {
-                            backgroundColor:
-                              isRecording || isPlaying
-                                ? COLORS.DISABLED
-                                : COLORS.ERROR,
-                          },
-                        ]}
-                      >
-                        <Text style={styles.smallButtonText}>Delete</Text>
-                      </View>
-                    </TouchableHighlight>
-                  </View>
-                </View>
-              ))
             )}
           </View>
 
-          <View style={styles.buttonRow}>
+          {/* Controls Section */}
+          <View style={styles.controlsSection}>
             <TouchableHighlight
-              onPress={() => setRate(getNextRate(rate, 'decrease'))}
-              underlayColor="#e0e0e0"
-              accessibilityLabel="Decrease rate"
+              onPress={handleRotatePress}
+              accessibilityLabel="Rotate orientation"
               accessibilityRole="button"
               style={styles.buttonWrapper}
-              disabled={rate <= (RATE_VALUES[0] as number)}
             >
-              <View
-                style={[
-                  styles.button,
-                  styles.rateButton,
-                  {
-                    backgroundColor:
-                      rate <= (RATE_VALUES[0] as number)
-                        ? COLORS.DISABLED
-                        : COLORS.SUCCESS,
-                  },
-                ]}
-              >
-                <Text style={styles.buttonText}>−</Text>
+              <View style={styles.button}>
+                <Text style={styles.buttonText}>Rotate</Text>
               </View>
             </TouchableHighlight>
-            <View style={styles.rateDisplay}>
-              <Text style={styles.rateText}>{rate} Hz</Text>
+
+            <View style={styles.buttonRow}>
+              <TouchableHighlight
+                onPress={handleLevelPress}
+                underlayColor="#e0e0e0"
+                accessibilityLabel="Level the AHRS system"
+                accessibilityRole="button"
+                style={styles.buttonWrapper}
+              >
+                <View style={styles.button}>
+                  <Text style={styles.buttonText}>Level</Text>
+                </View>
+              </TouchableHighlight>
+              <TouchableHighlight
+                onPress={() => Ahrs.reset()}
+                underlayColor="#e0e0e0"
+                style={styles.buttonWrapper}
+              >
+                <View style={styles.button}>
+                  <Text style={styles.buttonText}>Reset</Text>
+                </View>
+              </TouchableHighlight>
             </View>
-            <TouchableHighlight
-              onPress={() => setRate(getNextRate(rate, 'increase'))}
-              underlayColor="#e0e0e0"
-              accessibilityLabel="Increase rate"
-              accessibilityRole="button"
-              style={styles.buttonWrapper}
-              disabled={rate >= (RATE_VALUES[RATE_VALUES.length - 1] as number)}
-            >
-              <View
-                style={[
-                  styles.button,
-                  styles.rateButton,
-                  {
-                    backgroundColor:
-                      rate >= (RATE_VALUES[RATE_VALUES.length - 1] as number)
-                        ? COLORS.DISABLED
-                        : COLORS.SUCCESS,
-                  },
-                ]}
-              >
-                <Text style={styles.buttonText}>+</Text>
+
+            {/* Recording Controls */}
+            <View style={styles.dataSection}>
+              <Text style={styles.sectionTitle}>Recording</Text>
+              {!isRecording ? (
+                <TouchableHighlight
+                  onPress={handleStartRecording}
+                  underlayColor="#e0e0e0"
+                  style={styles.buttonWrapper}
+                  disabled={isPlaying}
+                >
+                  <View
+                    style={[
+                      styles.button,
+                      {
+                        backgroundColor: isPlaying
+                          ? COLORS.DISABLED
+                          : COLORS.ERROR,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.buttonText}>Start Recording</Text>
+                  </View>
+                </TouchableHighlight>
+              ) : (
+                <View>
+                  <View style={styles.statusRow}>
+                    <Text style={styles.statusLabel}>Recording:</Text>
+                    <StatusIndicator color={COLORS.ERROR} text="ACTIVE" />
+                  </View>
+                  <TouchableHighlight
+                    onPress={handleStopRecording}
+                    underlayColor="#e0e0e0"
+                    style={styles.buttonWrapper}
+                  >
+                    <View
+                      style={[styles.button, { backgroundColor: COLORS.ERROR }]}
+                    >
+                      <Text style={styles.buttonText}>Stop Recording</Text>
+                    </View>
+                  </TouchableHighlight>
+                </View>
+              )}
+            </View>
+
+            {/* Playback Controls */}
+            {isPlaying && (
+              <View style={styles.dataSection}>
+                <Text style={styles.sectionTitle}>Playback</Text>
+                <View style={styles.statusRow}>
+                  <Text style={styles.statusLabel}>Playing:</Text>
+                  <StatusIndicator color={COLORS.SUCCESS} text="ACTIVE" />
+                </View>
+                <TouchableHighlight
+                  onPress={handleStopPlayback}
+                  underlayColor="#e0e0e0"
+                  style={styles.buttonWrapper}
+                >
+                  <View
+                    style={[styles.button, { backgroundColor: COLORS.SUCCESS }]}
+                  >
+                    <Text style={styles.buttonText}>Stop Playback</Text>
+                  </View>
+                </TouchableHighlight>
               </View>
-            </TouchableHighlight>
+            )}
+
+            {/* File Explorer */}
+            <View style={styles.dataSection}>
+              <Text style={styles.sectionTitle}>Recordings</Text>
+              <TouchableHighlight
+                onPress={loadRecordingFiles}
+                underlayColor="#e0e0e0"
+                style={styles.buttonWrapper}
+              >
+                <View
+                  style={[
+                    styles.button,
+                    { backgroundColor: COLORS.PRIMARY, padding: 10 },
+                  ]}
+                >
+                  <Text style={styles.buttonText}>Refresh</Text>
+                </View>
+              </TouchableHighlight>
+              {recordingFiles.length === 0 ? (
+                <Text style={styles.dataLabel}>No recordings found</Text>
+              ) : (
+                recordingFiles.map((file) => (
+                  <View key={file.filename} style={styles.fileRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dataLabel}>{file.filename}</Text>
+                      <Text
+                        style={[
+                          styles.dataValue,
+                          { fontSize: 12, fontWeight: '400' },
+                        ]}
+                      >
+                        {(file.size / 1024).toFixed(1)} KB •{' '}
+                        {new Date(file.date).toLocaleString()}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableHighlight
+                        onPress={() => handlePlayback(file.filename)}
+                        underlayColor="#e0e0e0"
+                        disabled={isRecording || isPlaying}
+                        style={{ borderRadius: 6 }}
+                      >
+                        <View
+                          style={[
+                            styles.smallButton,
+                            {
+                              backgroundColor:
+                                isRecording || isPlaying
+                                  ? COLORS.DISABLED
+                                  : COLORS.SUCCESS,
+                            },
+                          ]}
+                        >
+                          <Text style={styles.smallButtonText}>Play</Text>
+                        </View>
+                      </TouchableHighlight>
+                      <TouchableHighlight
+                        onPress={() => handleDeleteRecording(file.filename)}
+                        underlayColor="#e0e0e0"
+                        disabled={isRecording || isPlaying}
+                        style={{ borderRadius: 6 }}
+                      >
+                        <View
+                          style={[
+                            styles.smallButton,
+                            {
+                              backgroundColor:
+                                isRecording || isPlaying
+                                  ? COLORS.DISABLED
+                                  : COLORS.ERROR,
+                            },
+                          ]}
+                        >
+                          <Text style={styles.smallButtonText}>Delete</Text>
+                        </View>
+                      </TouchableHighlight>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+
+            <View style={styles.buttonRow}>
+              <TouchableHighlight
+                onPress={() => setRate(getNextRate(rate, 'decrease'))}
+                underlayColor="#e0e0e0"
+                accessibilityLabel="Decrease rate"
+                accessibilityRole="button"
+                style={styles.buttonWrapper}
+                disabled={rate <= (RATE_VALUES[0] as number)}
+              >
+                <View
+                  style={[
+                    styles.button,
+                    styles.rateButton,
+                    {
+                      backgroundColor:
+                        rate <= (RATE_VALUES[0] as number)
+                          ? COLORS.DISABLED
+                          : COLORS.SUCCESS,
+                    },
+                  ]}
+                >
+                  <Text style={styles.buttonText}>−</Text>
+                </View>
+              </TouchableHighlight>
+              <View style={styles.rateDisplay}>
+                <Text style={styles.rateText}>{rate} Hz</Text>
+              </View>
+              <TouchableHighlight
+                onPress={() => setRate(getNextRate(rate, 'increase'))}
+                underlayColor="#e0e0e0"
+                accessibilityLabel="Increase rate"
+                accessibilityRole="button"
+                style={styles.buttonWrapper}
+                disabled={
+                  rate >= (RATE_VALUES[RATE_VALUES.length - 1] as number)
+                }
+              >
+                <View
+                  style={[
+                    styles.button,
+                    styles.rateButton,
+                    {
+                      backgroundColor:
+                        rate >= (RATE_VALUES[RATE_VALUES.length - 1] as number)
+                          ? COLORS.DISABLED
+                          : COLORS.SUCCESS,
+                    },
+                  ]}
+                >
+                  <Text style={styles.buttonText}>+</Text>
+                </View>
+              </TouchableHighlight>
+            </View>
           </View>
-        </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

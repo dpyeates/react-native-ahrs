@@ -127,6 +127,7 @@ RCT_EXPORT_MODULE()
     _hasValidGroundTrack = NO;
     _lastDeclinationLatRad = 0.0;
     _lastDeclinationLonRad = 0.0;
+    _hasDeclination = NO;
     _expectedMagN_nT = std::numeric_limits<float>::quiet_NaN();
     _expectedMagE_nT = std::numeric_limits<float>::quiet_NaN();
     _expectedMagD_nT = std::numeric_limits<float>::quiet_NaN();
@@ -358,6 +359,7 @@ RCT_EXPORT_METHOD(resetAhrs) {
   _hasGpsFix = NO;
   _lastGpsTimestampUs = 0;
   _currentTow = 0;
+  _hasDeclination = NO;
   
   // ===== Reset Timestamp Tracking =====
   // Clear last timestamp to force recalculation of dt on next update

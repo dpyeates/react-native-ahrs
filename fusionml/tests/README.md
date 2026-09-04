@@ -1,8 +1,8 @@
 # fusionml Tests
 
-Standalone C++ unit tests for the `fusionml` components (AltitudeCalculator, JsonRecorder, FlightPhaseDetector, XYZgeomag).
+Standalone C++ tests for `fusionml` (uNavINS, AltitudeCalculator, JsonRecorder, FlightPhaseDetector, XYZgeomag).
 
-## Run via Python wrapper (recommended)
+## Run
 
 From the repo root:
 
@@ -18,22 +18,16 @@ Options:
 - `--build-only` — build all tests but do not run them
 - `-v`, `--verbose` — print compiler and runner commands
 
-Requires `clang++` or `g++` and zlib development headers (e.g. `brew install zlib` on macOS).
+Requires `g++` or `clang++` and zlib development headers.
 
-## Manual build and run (macOS/Linux)
+## uNavINS (`test_unavins.cpp`)
 
-From the repo root:
+The filter is driven like iOS: 60 Hz IMU, GPS frozen between Core Location fixes (1 Hz on the ground, 5 Hz in the air), first sample `dt = 0`. Specific force is z-down (`az = -G` when level).
 
-```bash
-clang++ -std=c++14 -Ifusionml/src fusionml/tests/test_altitude_calculator.cpp \
-  fusionml/src/AltitudeCalculator.cpp -o /tmp/test_altitude && /tmp/test_altitude
-
-clang++ -std=c++14 -Ifusionml/src fusionml/tests/test_json_recorder.cpp \
-  fusionml/src/JsonRecorder.cpp -lz -o /tmp/test_json && /tmp/test_json
-
-clang++ -std=c++14 -Ifusionml/src fusionml/tests/test_flight_phase_detector.cpp \
-  fusionml/src/FlightPhaseDetector.cpp -o /tmp/test_flight_phase && /tmp/test_flight_phase
-
-clang++ -std=c++14 -Ifusionml/src fusionml/tests/test_xyzgeomag.cpp \
-  -o /tmp/test_xyzgeomag && /tmp/test_xyzgeomag
-```
+| Suite | What it covers |
+| --- | --- |
+| Init / safety | `dt = 0` first sample, reject `|ax| > g`, missing mag, independent instances |
+| Static | Desk rest + ZUPT, handheld still (tremor, no rest), pickup |
+| Walking | 1.4 m/s pedestrian, 90° corner, mag spike |
+| Car | 20 m/s cruise, accel, brake, level 90° and 360° turns, stoplight ZUPT, urban GPS |
+| Aircraft | Cruise, accel/decel, climb, descent, coordinated / climbing / descending turns, 360° horizon, baro, GPS outage |

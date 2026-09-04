@@ -34,17 +34,12 @@
   double filterHeading = normalizeHeadingDegrees(_filter->getHeading_rad() * rad2deg);
   
   // Heading: X-Plane ground truth when connected, otherwise filter output
-  double rotationOffset = 0.0;
-  if (self.rotation == AhrsRotationLeft) {
-    rotationOffset = 90.0;
-  } else if (self.rotation == AhrsRotationRight) {
-    rotationOffset = -90.0;
-  }
   double heading;
   if (self.hasXPlaneHeading) {
     heading = normalizeHeadingDegrees(self.latestXPlaneHeadingDeg);
   } else {
-    heading = normalizeHeadingDegrees(filterHeading + rotationOffset);
+    // Sensors are already transformed into aviation body axes before the filter.
+    heading = filterHeading;
   }
 
   double vel_n = _filter->getVelNorth_ms();
@@ -151,6 +146,9 @@
   }
   
   int filterHealthStatus = _filter->getHealthStatus();
+  BOOL attitudeValid = self.filterInitialized && _filter->isInitialized() &&
+                       filterHealthStatus < 3 &&
+                       std::isfinite(roll) && std::isfinite(pitch) && std::isfinite(heading);
   [self emitOnAhrsUpdate:@{
     @"roll": @(roll),
     @"pitch": @(pitch),
@@ -172,11 +170,13 @@
     @"longitude": @(lon_deg),
     @"flightPhase": @(flightPhase),
     @"flightPhaseConfidence": @(flightPhaseConfidence),
-    @"attitudeValid": @(self.filterInitialized),
+    @"attitudeValid": @(attitudeValid),
     @"altitudeValid": @(self.hasGpsFix || self.baroCalibrated),
     @"positionValid": @(self.hasGpsFix),
     @"flightPhaseValid": @(flightPhaseValid),
     @"filterHealthStatus": @(filterHealthStatus),
+    @"atRest": @(_filter->isAtRest()),
+    @"zuptActive": @(_filter->isZuptActive()),
   }];
   
   self.nextEmitTime = timestamp + (uint64_t)(1000000.0 / self.emitRateHz);

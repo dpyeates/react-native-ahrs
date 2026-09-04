@@ -5,8 +5,7 @@ import NativeAhrs from '../NativeAhrs';
 let storedAhrsCallback: ((data: AhrsData) => void) | null = null;
 let storedPlaybackCallback: ((event: PlaybackStateEvent) => void) | null = null;
 let storedXPlaneCallback:
-  | ((event: { connected: boolean; host: string }) => void)
-  | null = null;
+  ((event: { connected: boolean; host: string }) => void) | null = null;
 
 // Mock the native module with callback capture
 jest.mock('../NativeAhrs', () => ({
@@ -111,6 +110,9 @@ describe('AHRS Integration Tests', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: false,
+        filterHealthStatus: 0,
+        atRest: false,
+        zuptActive: false,
       };
 
       // Simulate native module emitting data
@@ -472,6 +474,9 @@ describe('AHRS Integration Tests', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: true,
+        filterHealthStatus: 0,
+        atRest: false,
+        zuptActive: false,
       };
 
       emitAhrsData(fullData);
@@ -510,7 +515,11 @@ describe('AHRS Integration Tests', () => {
     it('should handle getRecordingFiles', async () => {
       const mockFiles = [
         { filename: 'flight1.json.gz', size: 1024, date: Date.now() },
-        { filename: 'flight2.json.gz', size: 2048, date: Date.now() - 86400000 },
+        {
+          filename: 'flight2.json.gz',
+          size: 2048,
+          date: Date.now() - 86400000,
+        },
       ];
       (NativeAhrs.getRecordingFiles as jest.Mock).mockResolvedValue(mockFiles);
 

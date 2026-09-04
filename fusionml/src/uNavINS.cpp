@@ -47,91 +47,117 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
                      float bn, float be, float bd,
                      float hacc, float vacc, float sacc,
                      float baro_pressure, float baro_qnh) {
-  if (dt_in <= 0.0) {
-    return;
-  }
   if (!initialized) {
-    // initial attitude and heading
-    theta = asinf(ax/G);
-    phi = asinf(-ay/(G*cosf(theta)));
-    // magnetic heading correction due to roll and pitch angle
-    Bxc = hx*cosf(theta) + (hy*sinf(phi) + hz*cosf(phi))*sinf(theta);
-    Byc = hy*cosf(phi) - hz*sinf(phi);
-    // finding initial heading
-    if (-Byc > 0) {
-      psi = M_PI/2.0f - atanf(Bxc/-Byc);
-    } else {
-      psi= 3.0f*M_PI/2.0f - atanf(Bxc/-Byc);
+    if (!std::isfinite(ax) || !std::isfinite(ay) || !std::isfinite(az) ||
+        !std::isfinite(p) || !std::isfinite(q) || !std::isfinite(r)) {
+      return;
     }
-    psi = constrainAngle180(psi);
+    float accel_norm = sqrtf(ax * ax + ay * ay + az * az);
+    if (accel_norm < 0.5f * G || accel_norm > 1.5f * G) {
+      return;
+    }
+    float ax_over_g = ax / G;
+    if (fabsf(ax_over_g) > 1.0f) {
+      return;
+    }
+    theta = asinf(ax_over_g);
+    float cos_theta = cosf(theta);
+    if (fabsf(cos_theta) < 1e-3f) {
+      return;
+    }
+    float ay_term = -ay / (G * cos_theta);
+    if (fabsf(ay_term) > 1.0f) {
+      return;
+    }
+    phi = asinf(ay_term);
+
+    float mag_norm_uT = sqrtf(hx * hx + hy * hy + hz * hz);
+    bool mag_ok = std::isfinite(hx) && std::isfinite(hy) && std::isfinite(hz) && mag_norm_uT > 5.0f;
+    if (mag_ok) {
+      Bxc = hx * cosf(theta) + (hy * sinf(phi) + hz * cosf(phi)) * sinf(theta);
+      Byc = hy * cosf(phi) - hz * sinf(phi);
+      psi = constrainAngle180(atan2f(-Byc, Bxc));
+    } else {
+      psi = 0.0f;
+    }
     psi_initial = psi;
     // euler to quaternion
     quat(0) = cosf(psi/2.0f)*cosf(theta/2.0f)*cosf(phi/2.0f) + sinf(psi/2.0f)*sinf(theta/2.0f)*sinf(phi/2.0f);
     quat(1) = cosf(psi/2.0f)*cosf(theta/2.0f)*sinf(phi/2.0f) - sinf(psi/2.0f)*sinf(theta/2.0f)*cosf(phi/2.0f);
     quat(2) = cosf(psi/2.0f)*sinf(theta/2.0f)*cosf(phi/2.0f) + sinf(psi/2.0f)*cosf(theta/2.0f)*sinf(phi/2.0f);
     quat(3) = sinf(psi/2.0f)*cosf(theta/2.0f)*cosf(phi/2.0f) - cosf(psi/2.0f)*sinf(theta/2.0f)*sinf(phi/2.0f);
+    if (!quat.allFinite()) {
+      return;
+    }
     // Assemble the matrices
-    // ... gravity
     grav(2,0) = G;
-    // ... H
+    H.setZero();
     H.block(0,0,6,6) = Eigen::Matrix<float,6,6>::Identity();
-    // // ... Rw
-    // Rw.block(0,0,3,3) = powf(SIG_W_A,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // Rw.block(3,3,3,3) = powf(SIG_W_G,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // Rw.block(6,6,3,3) = 2.0f*powf(SIG_A_D,2.0f)/TAU_A*Eigen::Matrix<float,3,3>::Identity();
-    // Rw.block(9,9,3,3) = 2.0f*powf(SIG_G_D,2.0f)/TAU_G*Eigen::Matrix<float,3,3>::Identity();
-    // // ... P
-    // P.block(0,0,3,3) = powf(P_P_INIT,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // P.block(3,3,3,3) = powf(P_V_INIT,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // P.block(6,6,2,2) = powf(P_A_INIT,2.0f)*Eigen::Matrix<float,2,2>::Identity();
-    // P(8,8) = powf(P_HDG_INIT,2.0f);
-    // P.block(9,9,3,3) = powf(P_AB_INIT,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // P.block(12,12,3,3) = powf(P_GB_INIT,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // // ... R
-    // R.block(0,0,2,2) = powf(SIG_GPS_P_NE,2.0f)*Eigen::Matrix<float,2,2>::Identity();
-    // R(2,2) = powf(SIG_GPS_P_D,2.0f);
-    // R.block(3,3,3,3) = powf(SIG_GPS_V,2.0f)*Eigen::Matrix<float,3,3>::Identity();
-    // ... Rw (15 process noise sources: 3 accel, 3 gyro, 3 accel bias, 3 gyro bias, 3 mag bias)
+    // Rw (15 process noise sources: 3 accel, 3 gyro, 3 accel bias, 3 gyro bias, 3 mag bias)
+    // Mag bias is estimated by a slow LPF, not Kalman, so keep that process noise tiny.
     Rw(0,0) = SIG_W_A*SIG_W_A;          Rw(1,1) = SIG_W_A*SIG_W_A;            Rw(2,2) = SIG_W_A*SIG_W_A;
     Rw(3,3) = SIG_W_G*SIG_W_G;          Rw(4,4) = SIG_W_G*SIG_W_G;            Rw(5,5) = SIG_W_G*SIG_W_G;
     Rw(6,6) = 2.0f*SIG_A_D*SIG_A_D/TAU_A; Rw(7,7) = 2.0f*SIG_A_D*SIG_A_D/TAU_A;   Rw(8,8) = 2.0f*SIG_A_D*SIG_A_D/TAU_A;
     Rw(9,9) = 2.0f*SIG_G_D*SIG_G_D/TAU_G; Rw(10,10) = 2.0f*SIG_G_D*SIG_G_D/TAU_G; Rw(11,11) = 2.0f*SIG_G_D*SIG_G_D/TAU_G;
-    Rw(12,12) = 2.0f*SIG_M_D*SIG_M_D/TAU_M; Rw(13,13) = 2.0f*SIG_M_D*SIG_M_D/TAU_M; Rw(14,14) = 2.0f*SIG_M_D*SIG_M_D/TAU_M;
+    Rw(12,12) = 1.0e-8f; Rw(13,13) = 1.0e-8f; Rw(14,14) = 1.0e-8f;
     // ... P
+    P.setZero();
     P(0,0) = P_P_INIT*P_P_INIT;       P(1,1) = P_P_INIT*P_P_INIT;       P(2,2) = P_P_INIT*P_P_INIT;
     P(3,3) = P_V_INIT*P_V_INIT;       P(4,4) = P_V_INIT*P_V_INIT;       P(5,5) = P_V_INIT*P_V_INIT;
     P(6,6) = P_A_INIT*P_A_INIT;       P(7,7) = P_A_INIT*P_A_INIT;       P(8,8) = P_HDG_INIT*P_HDG_INIT;
     P(9,9) = P_AB_INIT*P_AB_INIT;     P(10,10) = P_AB_INIT*P_AB_INIT;   P(11,11) = P_AB_INIT*P_AB_INIT;
     P(12,12) = P_GB_INIT*P_GB_INIT;   P(13,13) = P_GB_INIT*P_GB_INIT;   P(14,14) = P_GB_INIT*P_GB_INIT;
     P(15,15) = P_MB_INIT*P_MB_INIT;   P(16,16) = P_MB_INIT*P_MB_INIT;   P(17,17) = P_MB_INIT*P_MB_INIT;
-    // ... R
+    if (!mag_ok) {
+      P(8,8) = P_HDG_INIT * P_HDG_INIT;
+    }
+    // GPS R (6x6)
+    R.setZero();
     R(0,0) = SIG_GPS_P_NE*SIG_GPS_P_NE; R(1,1) = SIG_GPS_P_NE*SIG_GPS_P_NE; R(2,2) = SIG_GPS_P_D*SIG_GPS_P_D;
     R(3,3) = SIG_GPS_V*SIG_GPS_V;       R(4,4) = SIG_GPS_V*SIG_GPS_V;       R(5,5) = SIG_GPS_V*SIG_GPS_V;
-    R(6,6) = SIG_MAG*SIG_MAG;           R(7,7) = SIG_MAG*SIG_MAG;           R(8,8) = SIG_MAG*SIG_MAG;
 
-    // Initialize all biases to zero
-    abx = 0.0f; aby = 0.0f; abz = 0.0f;  // accel bias
-    gbx = 0.0f; gby = 0.0f; gbz = 0.0f;  // gyro bias
-    mbx = 0.0f; mby = 0.0f; mbz = 0.0f;  // mag bias
+    abx = 0.0f; aby = 0.0f; abz = 0.0f;
+    gbx = 0.0f; gby = 0.0f; gbz = 0.0f;
+    mbx = 0.0f; mby = 0.0f; mbz = 0.0f;
 
-    previousTOW = 0;  // GPS time of week
+    previousTOW = 0;
+    gps_has_updated = false;
+    have_gps_speed = false;
+    last_gps_ground_speed = 0.0f;
+    last_gps_fusion_time = 0.0;
+    gps_delay_estimate = GPS_DELAY_NOMINAL;
+    filter_time = 0.0;
+    last_mag_update_time = -1.0;
+    mag_filter_initialized = false;
+    mag_meas_filtered.setZero();
+    last_baro_update_time = -1.0;
+    last_accel_tilt_time = -1.0;
+    last_zupt_time = -1.0f;
+    low_speed_timer = 0.0f;
+    zupt_active = false;
+    rest_detector.reset();
 
-    // .. then initialize states with GPS Data
     lat_ins = lat;
     lon_ins = lon;
     alt_ins = alt;
     vn_ins = vn;
     ve_ins = ve;
     vd_ins = vd;
-    // specific force
     f_b(0,0) = ax;
     f_b(1,0) = ay;
     f_b(2,0) = az;
-    /* initialize the time */
+    om_ib(0,0) = p;
+    om_ib(1,0) = q;
+    om_ib(2,0) = r;
     _t = 0;
-    // initialized flag
     initialized = true;
-  } else {
+    return;
+  }
+
+  if (dt_in <= 0.0) {
+    return;
+  }
+  {
     // get the change in time
     _dt = (float)dt_in;
     if (_dt < 1e-4f) _dt = 1e-4f;
@@ -139,10 +165,6 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
     
     filter_time += _dt;
 
-    // Store raw IMU data before any processing. We'll need this for re-propagation after delayed GPS updates
-    addImuSample(filter_time, p, q, r, ax, ay, az);
-
-    // are we at rest?
     bool at_rest = rest_detector.update(p, q, r, ax, ay, az);
     
     lla_ins(0,0) = lat_ins;
@@ -233,11 +255,18 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
     // SPEED-BASED ZUPT TRIGGER LOGIC
     // Track sustained low ground speed to enable ZUPT for stationary scenarios
     // (person holding phone while standing still, car at stoplight, etc.)
-    float ground_speed = sqrtf(vn_ins*vn_ins + ve_ins*ve_ins);
-    // Hysteresis thresholds
-    const float ZUPT_SPEED_ENTER = 1.0f;   // m/s - sustained low speed to enable ZUPT
-    const float ZUPT_SPEED_EXIT = 1.5f;    // m/s - exit ZUPT (prevent flicker)
-    const float ZUPT_TIME_REQUIRED = 3.0f; // seconds sustained below threshold
+    // Trigger ZUPT from fresh GPS speed so a diverging INS cannot ZUPT itself,
+    // and so a stale last-fix of 0 m/s cannot ZUPT a moving vehicle after GPS loss.
+    const float GPS_SPEED_STALE_S = 2.0f;
+    bool gps_speed_fresh = have_gps_speed &&
+                           ((filter_time - last_gps_fusion_time) < GPS_SPEED_STALE_S);
+    float zupt_speed = gps_speed_fresh
+      ? last_gps_ground_speed
+      : sqrtf(vn_ins * vn_ins + ve_ins * ve_ins);
+    float ground_speed = zupt_speed;
+    const float ZUPT_SPEED_ENTER = 1.0f;
+    const float ZUPT_SPEED_EXIT = 1.5f;
+    const float ZUPT_TIME_REQUIRED = 3.0f;
     // Update timer based on current ground speed
     if (ground_speed < ZUPT_SPEED_ENTER) {
       low_speed_timer += _dt;
@@ -252,35 +281,32 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
     if (low_speed_timer > ZUPT_TIME_REQUIRED * 2.0f) {
       low_speed_timer = ZUPT_TIME_REQUIRED * 2.0f;
     }
-    // GPS measurement update
-    if ((TOW - previousTOW) > 0) {
-      // GPS measurements represent vehicle state at (t_current - GPS_delay), not t_current.
-      // We compensate for this in two ways:      //
-      // 1. ADAPTIVE DELAY ESTIMATION: Estimate GPS latency from update rate
-      // 2. DELAY-AWARE MEASUREMENT NOISE: Scale GPS noise based on delay
-      //    - Longer delay → less reliable → higher measurement noise
-      //    - This reduces Kalman gain for stale measurements
-      double gps_interval = (double)(TOW - previousTOW) / 1000.0;  // seconds
+    bool new_gps = false;
+    if (gps_has_updated) {
+      new_gps = (TOW - previousTOW) > 0;
+    } else {
+      // First GPS: accept a non-zero TOW, or a non-origin lat/lon (X-Plane starts TOW at 0)
+      new_gps = (TOW > 0) || (fabs(lat) > 1e-12 || fabs(lon) > 1e-12);
+    }
+    if (new_gps && std::isfinite(lat) && std::isfinite(lon) && std::isfinite(alt)) {
+      double gps_interval = gps_has_updated ? ((double)(TOW - previousTOW) / 1000.0) : 1.0;
       previousTOW = TOW;
-      // Adaptive delay estimation based on update rate
-      if (gps_interval > 0.1 && gps_interval < 5.0) {  // Sanity check
-        // High rate GPS (>2 Hz, interval <0.5s) → lower delay
-        // Low rate GPS (≤1 Hz, interval ≥1.0s) → higher delay
+      gps_has_updated = true;
+      last_gps_ground_speed = sqrtf((float)(vn * vn + ve * ve));
+      have_gps_speed = true;
+      if (gps_interval > 0.1 && gps_interval < 5.0) {
         float rate_based_delay = GPS_DELAY_NOMINAL;
         if (gps_interval < 0.5f) {
-          rate_based_delay = GPS_DELAY_MIN + 0.05f;  // ~100ms for high-rate GPS
+          rate_based_delay = GPS_DELAY_MIN + 0.05f;
         } else if (gps_interval >= 1.0f) {
-          rate_based_delay = GPS_DELAY_NOMINAL + 0.05f;  // ~250ms for 1 Hz GPS
+          rate_based_delay = GPS_DELAY_NOMINAL + 0.05f;
         }
-        // Exponential filter for smooth delay estimate
         const float DELAY_FILTER_ALPHA = 0.1f;
         gps_delay_estimate = (1.0f - DELAY_FILTER_ALPHA) * gps_delay_estimate +
                              DELAY_FILTER_ALPHA * rate_based_delay;
-        // Clamp to reasonable range
         if (gps_delay_estimate < GPS_DELAY_MIN) gps_delay_estimate = GPS_DELAY_MIN;
         if (gps_delay_estimate > GPS_DELAY_MAX) gps_delay_estimate = GPS_DELAY_MAX;
       }
-      // Compute scale factor for measurement noise based on delay
       float delay_scale = computeDelayScaleFactor(gps_delay_estimate);
       last_gps_fusion_time = filter_time;
       lla_gps(0,0) = lat;
@@ -295,102 +321,57 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       V_ins(0,0) = vn_ins;
       V_ins(1,0) = ve_ins;
       V_ins(2,0) = vd_ins;
-      // Position, converted to NED
       pos_ecef_ins = lla2ecef(lla_ins);
       pos_ned_ins = ecef2ned(pos_ecef_ins,lla_ins);
       pos_ecef_gps = lla2ecef(lla_gps);
       pos_ned_gps = ecef2ned(pos_ecef_gps,lla_ins);
-      // Create GPS measurement innovation (y[0-5])
       y(0,0) = (float)(pos_ned_gps(0,0) - pos_ned_ins(0,0));
       y(1,0) = (float)(pos_ned_gps(1,0) - pos_ned_ins(1,0));
       y(2,0) = (float)(pos_ned_gps(2,0) - pos_ned_ins(2,0));
       y(3,0) = (float)(V_gps(0,0) - V_ins(0,0));
       y(4,0) = (float)(V_gps(1,0) - V_ins(1,0));
       y(5,0) = (float)(V_gps(2,0) - V_ins(2,0));
-      // Build H matrix for GPS (first 6 rows, maps to pos/vel states 0-5)
       H.setZero();
       H.block(0,0,6,6) = Eigen::Matrix<float,6,6>::Identity();
-      // GPS-only update: zero out magnetometer rows
-      y(6,0) = 0.0f;
-      y(7,0) = 0.0f;
-      y(8,0) = 0.0f;
-      H.block(6,0,3,18).setZero();
-      // ADAPTIVE MEASUREMENT NOISE SCALING
-      // Scale GPS measurement noise based on:
-      // 1. GPS delay (longer delay = less trust)
-      // 2. Reported GPS accuracy (worse accuracy = less trust)
-      Eigen::Matrix<float,9,9> R_scaled = R;
-      // 1. Delay-based scaling (already computed)
+      Eigen::Matrix<float,6,6> R_scaled = R;
       float delay_scale_sq = delay_scale * delay_scale;
-      // 2. GPS accuracy-based scaling
-      // Use reported accuracy if valid, otherwise use nominal values
       bool has_valid_hacc = (hacc > 0.0f && std::isfinite(hacc));
       bool has_valid_vacc = (vacc > 0.0f && std::isfinite(vacc));
       bool has_valid_sacc = (sacc > 0.0f && std::isfinite(sacc));
-      // Horizontal position noise: max(nominal, reported_accuracy)
       float gps_pos_noise_ne = SIG_GPS_P_NE;
       if (has_valid_hacc) {
         gps_pos_noise_ne = fmaxf(SIG_GPS_P_NE, hacc);
       }
-      // Vertical position noise: max(nominal, reported_accuracy)
       float gps_pos_noise_d = SIG_GPS_P_D;
       if (has_valid_vacc) {
         gps_pos_noise_d = fmaxf(SIG_GPS_P_D, vacc);
       }
-      // Velocity noise: max(nominal, reported_accuracy)
       float gps_vel_noise = SIG_GPS_V;
       if (has_valid_sacc) {
         gps_vel_noise = fmaxf(SIG_GPS_V, sacc);
       }
-      // Apply adaptive noise (replace nominal R values)
       R_scaled(0,0) = gps_pos_noise_ne * gps_pos_noise_ne;
       R_scaled(1,1) = gps_pos_noise_ne * gps_pos_noise_ne;
       R_scaled(2,2) = gps_pos_noise_d * gps_pos_noise_d;
       R_scaled(3,3) = gps_vel_noise * gps_vel_noise;
       R_scaled(4,4) = gps_vel_noise * gps_vel_noise;
       R_scaled(5,5) = gps_vel_noise * gps_vel_noise;
-      // Apply delay scaling on top of adaptive noise
-      R_scaled.block<6,6>(0,0) *= delay_scale_sq;
-      // Kalman gain (18x9) using fully adaptive measurement noise
-      K = P*H.transpose()*(H*P*H.transpose() + R_scaled).inverse();
-      // Covariance update (Joseph form for numerical stability)
-      // Use R_scaled (not R) for consistency with Kalman gain
-      Eigen::Matrix<float,18,18> I_KH = Eigen::Matrix<float,18,18>::Identity() - K*H;
-      P = I_KH*P*I_KH.transpose() + K*R_scaled*K.transpose();
-      P = 0.5f*(P+P.transpose());
-      // State update
-      x = K*y;
-      denom = (1.0 - (ECC2 * pow(sin(lla_ins(0,0)),2.0)));
-      denom = sqrt(denom*denom);
-      Re = EARTH_RADIUS / sqrt(denom);
-      Rn = EARTH_RADIUS*(1.0-ECC2) / denom*sqrt(denom);
-      alt_ins = alt_ins - x(2,0);
-      lat_ins = lat_ins + x(0,0) / (Re + alt_ins);
-      lon_ins = lon_ins + x(1,0) / (Rn + alt_ins) / cos(lat_ins);
-      vn_ins = vn_ins + x(3,0);
-      ve_ins = ve_ins + x(4,0);
-      vd_ins = vd_ins + x(5,0);
-      // Attitude correction
-      dq(0,0) = 1.0f;
-      dq(1,0) = x(6,0);
-      dq(2,0) = x(7,0);
-      dq(3,0) = x(8,0);
-      quat = qmult(quat,dq);
-      quat.normalize();
-      // Obtain euler angles from quaternion
-      theta = asinf(-2.0f*(quat(1,0)*quat(3,0)-quat(0,0)*quat(2,0)));
-      phi = atan2f(2.0f*(quat(0,0)*quat(1,0)+quat(2,0)*quat(3,0)),1.0f-2.0f*(quat(1,0)*quat(1,0)+quat(2,0)*quat(2,0)));
-      psi = atan2f(2.0f*(quat(1,0)*quat(2,0)+quat(0,0)*quat(3,0)),1.0f-2.0f*(quat(2,0)*quat(2,0)+quat(3,0)*quat(3,0)));
-      // Update bias estimates
-      abx = abx + x(9,0);
-      aby = aby + x(10,0);
-      abz = abz + x(11,0);
-      gbx = gbx + x(12,0);
-      gby = gby + x(13,0);
-      gbz = gbz + x(14,0);
-      mbx = mbx + x(15,0);
-      mby = mby + x(16,0);
-      mbz = mbz + x(17,0);
+      R_scaled *= delay_scale_sq;
+      Eigen::Matrix<float,6,6> S_gps = H * P * H.transpose() + R_scaled;
+      // Gross-outlier gate only. A tight 3-sigma gate rejects usable GPS when
+      // the IMU model is slightly wrong (typical on a phone).
+      bool gps_innovation_ok =
+          (fabsf(y(0, 0)) < 100.0f) && (fabsf(y(1, 0)) < 100.0f) &&
+          (fabsf(y(2, 0)) < 80.0f) && (fabsf(y(3, 0)) < 80.0f) &&
+          (fabsf(y(4, 0)) < 80.0f) && (fabsf(y(5, 0)) < 80.0f);
+      if (gps_innovation_ok) {
+        K = P * H.transpose() * S_gps.inverse();
+        Eigen::Matrix<float,18,18> I_KH = Eigen::Matrix<float,18,18>::Identity() - K * H;
+        P = I_KH * P * I_KH.transpose() + K * R_scaled * K.transpose();
+        P = 0.5f * (P + P.transpose());
+        x = K * y;
+        applyNavigationCorrection(x);
+      }
     }
     // ZUPT MEASUREMENT UPDATE
     // Apply zero-velocity update when stationary (speed-based trigger)
@@ -400,7 +381,11 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       // Safety gate: only apply if current 3D velocity is reasonable
       // (prevents ZUPT during actual motion with stale GPS or filter divergence)
       float speed_3d = sqrtf(vn_ins*vn_ins + ve_ins*ve_ins + vd_ins*vd_ins);
-      if (speed_3d < 3.0f) {
+      // When GPS confirms a stop, ZUPT must still run — that is how a
+      // diverged INS recovers. The 3 m/s cap is only for INS-speed ZUPT
+      // after GPS has gone stale.
+      float zupt_speed_gate = gps_speed_fresh ? 80.0f : 3.0f;
+      if (speed_3d < zupt_speed_gate) {
         // ZUPT: observe velocity = [0, 0, 0] in NED frame
         Eigen::Matrix<float,3,1> v_obs;
         v_obs << 0.0f, 0.0f, 0.0f;
@@ -430,41 +415,7 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
         Eigen::Matrix<float,18,3> K_zupt = P * H_zupt.transpose() * S_zupt.inverse();
         // State correction
         Eigen::Matrix<float,18,1> x_zupt = K_zupt * y_zupt;
-        // Apply state corrections (same pattern as GPS update)
-        // Position correction
-        denom = (1.0 - (ECC2 * pow(sin(lat_ins),2.0)));
-        denom = sqrt(denom*denom);
-        Re = EARTH_RADIUS / sqrt(denom);
-        Rn = EARTH_RADIUS*(1.0-ECC2) / denom*sqrt(denom);
-        alt_ins = alt_ins - x_zupt(2,0);
-        lat_ins = lat_ins + x_zupt(0,0) / (Re + alt_ins);
-        lon_ins = lon_ins + x_zupt(1,0) / (Rn + alt_ins) / cos(lat_ins);
-        // Velocity correction
-        vn_ins = vn_ins + x_zupt(3,0);
-        ve_ins = ve_ins + x_zupt(4,0);
-        vd_ins = vd_ins + x_zupt(5,0);
-        // Attitude correction
-        dq(0,0) = 1.0f;
-        dq(1,0) = x_zupt(6,0);
-        dq(2,0) = x_zupt(7,0);
-        dq(3,0) = x_zupt(8,0);
-        quat = qmult(quat,dq);
-        quat.normalize();
-        // Obtain euler angles from quaternion
-        theta = asinf(-2.0f*(quat(1,0)*quat(3,0)-quat(0,0)*quat(2,0)));
-        phi = atan2f(2.0f*(quat(0,0)*quat(1,0)+quat(2,0)*quat(3,0)),1.0f-2.0f*(quat(1,0)*quat(1,0)+quat(2,0)*quat(2,0)));
-        psi = atan2f(2.0f*(quat(1,0)*quat(2,0)+quat(0,0)*quat(3,0)),1.0f-2.0f*(quat(2,0)*quat(2,0)+quat(3,0)*quat(3,0)));
-        // Update bias estimates
-        abx = abx + x_zupt(9,0);
-        aby = aby + x_zupt(10,0);
-        abz = abz + x_zupt(11,0);
-        gbx = gbx + x_zupt(12,0);
-        gby = gby + x_zupt(13,0);
-        gbz = gbz + x_zupt(14,0);
-        mbx = mbx + x_zupt(15,0);
-        mby = mby + x_zupt(16,0);
-        mbz = mbz + x_zupt(17,0);
-        // Covariance update (Joseph form for numerical stability)
+        applyNavigationCorrection(x_zupt);
         Eigen::Matrix<float,18,18> I_KH_zupt =
           Eigen::Matrix<float,18,18>::Identity() - K_zupt * H_zupt;
         P = I_KH_zupt * P * I_KH_zupt.transpose() +
@@ -473,122 +424,139 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       }
     }
 
-    // Magnetometer measurement update (independent of GPS TOW)
-    static elapsedMicros mag_update_timer;
-    const float MAG_UPDATE_PERIOD_MS = 100.0f; // 10 Hz max
-    bool mag_update_ready = (mag_update_timer / 1000.0f) >= MAG_UPDATE_PERIOD_MS;
+    // Magnetometer: tilt-compensated heading at up to 10 Hz of filter time
+    const float MAG_UPDATE_PERIOD_S = 0.1f;
+    bool mag_update_ready = (last_mag_update_time < 0.0) ||
+                            ((filter_time - last_mag_update_time) >= MAG_UPDATE_PERIOD_S);
     bool mag_field_valid = std::isfinite(bn) && std::isfinite(be) && std::isfinite(bd);
+    bool mag_meas_valid = std::isfinite(hx) && std::isfinite(hy) && std::isfinite(hz);
 
-    if (mag_update_ready && mag_field_valid) {
-      mag_update_timer = 0;
-      // Convert measured mag from body frame to nT
+    if (mag_update_ready && mag_field_valid && mag_meas_valid) {
+      last_mag_update_time = filter_time;
+      C_N2B = quat2dcm(quat);
+      C_B2N = C_N2B.transpose();
       float hx_meas = hx * 1000.0f;
       float hy_meas = hy * 1000.0f;
       float hz_meas = hz * 1000.0f;
-      // Expected mag field in NED frame (passed as parameters, already in nT)
-      Eigen::Matrix<float,3,1> mag_ned;
-      mag_ned << bn, be, bd;
-      // Rotate expected NED field to body frame using current attitude DCM
-      mag_expected_body = C_N2B * mag_ned;
-      // ENHANCED MAGNETIC INTERFERENCE REJECTION
-      // Multiple gates to detect and reject magnetic interference:
-      // 1. Field magnitude gate (existing)
-      // 2. Inclination angle gate (VQF-inspired)
-      // 3. Temporal consistency gate (detect sudden changes)
-      // Gate 1: Field magnitude check
+      Eigen::Matrix<float,3,1> mag_ned_exp;
+      mag_ned_exp << bn, be, bd;
+      mag_expected_body = C_N2B * mag_ned_exp;
+
       float measured_field = sqrtf(hx_meas*hx_meas + hy_meas*hy_meas + hz_meas*hz_meas);
-      float expected_field = sqrtf(bn*bn + be*be + bd*bd);
+      float expected_field = mag_ned_exp.norm();
       float field_ratio = (expected_field > 0.0f) ? (measured_field / expected_field) : 0.0f;
       bool mag_magnitude_ok = (field_ratio > 0.5f && field_ratio < 2.0f);
-      // Gate 2: Inclination angle check (VQF approach)
-      // Magnetic field inclination should be consistent (doesn't change quickly)
-      // Interference typically affects horizontal more than vertical component
-      float horizontal_meas = sqrtf(hx_meas*hx_meas + hy_meas*hy_meas);
-      float horizontal_exp = sqrtf(bn*bn + be*be);
-      float inclination_meas = atan2f(-hz_meas, horizontal_meas);  // Note: -hz because body z is down
-      float inclination_exp = atan2f(-bd, horizontal_exp);
-      float inclination_error = fabsf(inclination_meas - inclination_exp);
-      bool mag_inclination_ok = (inclination_error < 0.35f);  // ~20 degrees tolerance
-      // Gate 3: Temporal consistency check (detect transient interference)
-      static Eigen::Matrix<float,3,1> mag_meas_filtered = Eigen::Matrix<float,3,1>::Zero();
-      static bool mag_filter_initialized = false;
+
+      // Attitude gate: horizontal mag is only a heading measurement near level
+      const float MAG_ATT_LIMIT = 0.52f; // ~30 deg
+      bool mag_attitude_ok = (fabsf(phi) < MAG_ATT_LIMIT && fabsf(theta) < MAG_ATT_LIMIT);
+
+      // Inclination in NED for both measured and expected
+      Eigen::Matrix<float,3,1> mag_body_corr;
+      mag_body_corr << (hx_meas - mbx), (hy_meas - mby), (hz_meas - mbz);
+      Eigen::Matrix<float,3,1> mag_ned_meas = C_B2N * mag_body_corr;
+      float Bh_meas = sqrtf(mag_ned_meas(0)*mag_ned_meas(0) + mag_ned_meas(1)*mag_ned_meas(1));
+      float Bh_exp = sqrtf(bn*bn + be*be);
+      float inclination_meas = atan2f(mag_ned_meas(2), fmaxf(Bh_meas, 1.0f));
+      float inclination_exp = atan2f(bd, fmaxf(Bh_exp, 1.0f));
+      float inclination_error = fabsf(constrainAngle180(inclination_meas - inclination_exp));
+      bool mag_inclination_ok = (inclination_error < 0.35f);
+
       Eigen::Matrix<float,3,1> mag_meas_current;
       mag_meas_current << hx_meas, hy_meas, hz_meas;
       if (!mag_filter_initialized) {
         mag_meas_filtered = mag_meas_current;
         mag_filter_initialized = true;
       }
-      // Compute innovation (difference from filtered value)
       Eigen::Matrix<float,3,1> mag_innovation = mag_meas_current - mag_meas_filtered;
       float innovation_magnitude = mag_innovation.norm();
-      // Update filtered magnetometer reading (low-pass filter)
       const float MAG_LPF_ALPHA = 0.1f;
       mag_meas_filtered = MAG_LPF_ALPHA * mag_meas_current + (1.0f - MAG_LPF_ALPHA) * mag_meas_filtered;
-      // Reject if sudden large change (likely transient interference like power lines, metal)
-      bool mag_temporally_stable = (innovation_magnitude < 10000.0f);  // 10 µT threshold
-      // Combined gate: all checks must pass
-      bool mag_reasonable = mag_magnitude_ok && mag_inclination_ok && mag_temporally_stable;
+      bool mag_temporally_stable = (innovation_magnitude < 10000.0f);
+
+      bool mag_reasonable = mag_magnitude_ok && mag_attitude_ok && mag_inclination_ok && mag_temporally_stable;
       if (mag_reasonable) {
-        // Yaw-only magnetometer update: compare horizontal mag direction
-        float mx_meas = hx_meas - mbx;
-        float my_meas = hy_meas - mby;
-        float mx_exp = mag_expected_body(0);
-        float my_exp = mag_expected_body(1);
-        // Compute signed yaw error between expected and measured horizontal vectors
-        float cross_z = mx_exp * my_meas - my_exp * mx_meas;
-        float dot_xy = mx_exp * mx_meas + my_exp * my_meas;
-        float yaw_error = constrainAngle180(atan2f(cross_z, dot_xy));
-        // Innovation gate (3-sigma) using equivalent yaw noise
-        float sigma_yaw = (expected_field > 0.0f) ? (SIG_MAG / expected_field) : 0.0f;
+        float hx_c = hx_meas - mbx;
+        float hy_c = hy_meas - mby;
+        float hz_c = hz_meas - mbz;
+        Bxc = hx_c * cosf(theta) + (hy_c * sinf(phi) + hz_c * cosf(phi)) * sinf(theta);
+        Byc = hy_c * cosf(phi) - hz_c * sinf(phi);
+        float mag_heading = constrainAngle180(atan2f(-Byc, Bxc));
+        float yaw_error = constrainAngle180(mag_heading - psi);
+        float sigma_yaw = (Bh_exp > 1.0f) ? (SIG_MAG / Bh_exp) : 0.0f;
         float innov_gate = 3.0f * sigma_yaw;
         if (sigma_yaw > 0.0f && fabsf(yaw_error) < innov_gate) {
-          // Measurement model: yaw error directly observes attitude yaw state (state 8)
           Eigen::Matrix<float,1,18> H_mag;
           H_mag.setZero();
           H_mag(0,8) = 1.0f;
           float R_mag = sigma_yaw * sigma_yaw;
-          // Kalman gain for yaw-only magnetometer update (18x1)
           float S_mag = (H_mag * P * H_mag.transpose())(0,0) + R_mag;
           Eigen::Matrix<float,18,1> K_mag = (P * H_mag.transpose()) / S_mag;
-          // Covariance update (Joseph form for numerical stability)
           Eigen::Matrix<float,18,18> I_KH_mag = Eigen::Matrix<float,18,18>::Identity() - K_mag * H_mag;
           P = I_KH_mag * P * I_KH_mag.transpose() + K_mag * R_mag * K_mag.transpose();
           P = 0.5f*(P + P.transpose());
-          // State update with yaw-only measurement
           x = K_mag * yaw_error;
-          // Apply attitude correction from yaw-only magnetometer update
-          dq(0,0) = 1.0f;
-          dq(1,0) = x(6,0);
-          dq(2,0) = x(7,0);
-          dq(3,0) = x(8,0);
-          quat = qmult(quat,dq);
-          quat.normalize();
-          // Obtain euler angles from quaternion
-          theta = asinf(-2.0f*(quat(1,0)*quat(3,0)-quat(0,0)*quat(2,0)));
-          phi = atan2f(2.0f*(quat(0,0)*quat(1,0)+quat(2,0)*quat(3,0)),1.0f-2.0f*(quat(1,0)*quat(1,0)+quat(2,0)*quat(2,0)));
-          psi = atan2f(2.0f*(quat(1,0)*quat(2,0)+quat(0,0)*quat(3,0)),1.0f-2.0f*(quat(2,0)*quat(2,0)+quat(3,0)*quat(3,0)));
-          // Simple horizontal mag bias estimator (yaw-only)
-          // Slowly adapt mbx/mby to reduce steady-state yaw error without affecting roll/pitch
-          const float MAG_BIAS_ALPHA = 0.01f; // small adaptation rate
+          applyNavigationCorrection(x);
+          const float MAG_BIAS_ALPHA = 0.01f;
           mbx += MAG_BIAS_ALPHA * (hx_meas - mag_expected_body(0) - mbx);
           mby += MAG_BIAS_ALPHA * (hy_meas - mag_expected_body(1) - mby);
         }
       }
     }
-    // ==========================================================================
-    // BAROMETRIC ALTITUDE FUSION (ArduPilot-inspired)
-    // Fuse barometric altitude when:
-    // 1. Barometer data is available and valid
-    // 2. GPS vertical accuracy is poor (>10m) or unavailable
-    //
-    // This provides better altitude estimation in GPS-degraded conditions
-    // (urban canyons, tree cover, etc.)
+
+    // Weak accelerometer roll/pitch aid when specific force is ~1 g.
+    // Coordinated turns measure nG along body z, so they are excluded.
+    const float ACCEL_TILT_PERIOD_S = 0.1f;
+    bool tilt_rate_ok = (last_accel_tilt_time < 0.0) ||
+                        ((filter_time - last_accel_tilt_time) >= ACCEL_TILT_PERIOD_S);
+    float accel_norm_tilt = sqrtf(ax * ax + ay * ay + az * az);
+    bool near_1g = (fabsf(accel_norm_tilt - G) < 0.8f);
+    bool gyro_slow = (fabsf(p) < 0.15f && fabsf(q) < 0.15f && fabsf(r) < 0.15f);
+    if (tilt_rate_ok && near_1g && gyro_slow && fabsf(ax) <= G) {
+      last_accel_tilt_time = filter_time;
+      float theta_acc = asinf(ax / G);
+      float cos_theta_acc = cosf(theta_acc);
+      if (fabsf(cos_theta_acc) > 1e-3f) {
+        float ay_term = -ay / (G * cos_theta_acc);
+        if (fabsf(ay_term) <= 1.0f) {
+          float phi_acc = asinf(ay_term);
+          float roll_err = constrainAngle180(phi_acc - phi);
+          float pitch_err = constrainAngle180(theta_acc - theta);
+          const float SIG_TILT = 0.14f; // ~8 deg
+          float tilt_gate = 3.0f * SIG_TILT;
+          if (fabsf(roll_err) < tilt_gate && fabsf(pitch_err) < tilt_gate) {
+            Eigen::Matrix<float,2,18> H_tilt;
+            H_tilt.setZero();
+            H_tilt(0, 6) = 1.0f;
+            H_tilt(1, 7) = 1.0f;
+            Eigen::Matrix<float,2,1> y_tilt;
+            y_tilt(0, 0) = roll_err;
+            y_tilt(1, 0) = pitch_err;
+            Eigen::Matrix<float,2,2> R_tilt;
+            R_tilt.setZero();
+            R_tilt(0, 0) = SIG_TILT * SIG_TILT;
+            R_tilt(1, 1) = SIG_TILT * SIG_TILT;
+            Eigen::Matrix<float,2,2> S_tilt = H_tilt * P * H_tilt.transpose() + R_tilt;
+            Eigen::Matrix<float,18,2> K_tilt = P * H_tilt.transpose() * S_tilt.inverse();
+            Eigen::Matrix<float,18,18> I_KH_tilt =
+                Eigen::Matrix<float,18,18>::Identity() - K_tilt * H_tilt;
+            P = I_KH_tilt * P * I_KH_tilt.transpose() +
+                K_tilt * R_tilt * K_tilt.transpose();
+            P = 0.5f * (P + P.transpose());
+            applyNavigationCorrection(K_tilt * y_tilt);
+          }
+        }
+      }
+    }
+
     bool has_valid_baro = (baro_pressure > 0.0f && std::isfinite(baro_pressure) &&
                            baro_pressure > 500.0f && baro_pressure < 1100.0f);
     bool vacc_available = (vacc > 0.0f && std::isfinite(vacc));
-    bool gps_vert_poor = (!vacc_available || vacc > 10.0f);  // GPS vacc >10m or unavailable
-    if (has_valid_baro && gps_vert_poor) {
-      // Compute barometric altitude
+    bool gps_vert_poor = (!vacc_available || vacc > 10.0f);
+    bool baro_rate_ok = (last_baro_update_time < 0.0) ||
+                        ((filter_time - last_baro_update_time) >= 0.2);
+    if (has_valid_baro && gps_vert_poor && baro_rate_ok) {
+      last_baro_update_time = filter_time;
       float baro_alt_m;
       if (baro_qnh > 0.0f && std::isfinite(baro_qnh)) {
         baro_alt_m = AltitudeCalculator::calculateQNH_m(baro_pressure, baro_qnh);
@@ -596,34 +564,23 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
         baro_alt_m = AltitudeCalculator::calculateQNE_m(baro_pressure);
       }
       if (std::isfinite(baro_alt_m)) {
-        // Barometric altitude innovation
-        // Note: alt_ins is altitude MSL, baro_alt_m is also MSL (via QNH) or FL (via QNE)
         float alt_innovation = baro_alt_m - (float)alt_ins;
-        // Barometric altitude measurement noise
-        // Typical barometer: 1-3m std dev depending on conditions
-        const float BARO_NOISE_BASE = 2.0f;  // 2m baseline
-        // Scale by atmospheric conditions (higher altitude = less accurate)
-        float alt_scale = 1.0f + fabsf((float)alt_ins) / 10000.0f;  // +10% per 1000m
+        const float BARO_NOISE_BASE = 2.0f;
+        float alt_scale = 1.0f + fabsf((float)alt_ins) / 10000.0f;
         float baro_noise = BARO_NOISE_BASE * alt_scale;
-        // Innovation gate (3-sigma) for barometer
         float baro_innov_gate = 3.0f * baro_noise;
         if (fabsf(alt_innovation) < baro_innov_gate) {
-          // Measurement model: barometer observes altitude (down position, state 2)
           Eigen::Matrix<float,1,18> H_baro;
           H_baro.setZero();
-          H_baro(0,2) = -1.0f;  // Negative because state 2 is "down" (positive down)
+          H_baro(0,2) = -1.0f;
           float R_baro = baro_noise * baro_noise;
-          // Kalman gain for barometric altitude update (18x1)
           float S_baro = (H_baro * P * H_baro.transpose())(0,0) + R_baro;
           Eigen::Matrix<float,18,1> K_baro = (P * H_baro.transpose()) / S_baro;
-          // Covariance update (Joseph form)
           Eigen::Matrix<float,18,18> I_KH_baro = Eigen::Matrix<float,18,18>::Identity() - K_baro * H_baro;
           P = I_KH_baro * P * I_KH_baro.transpose() + K_baro * R_baro * K_baro.transpose();
           P = 0.5f*(P + P.transpose());
-          // State update with barometric altitude
           x = K_baro * alt_innovation;
-          // Apply altitude correction
-          alt_ins = alt_ins - x(2,0);  // Subtract because down is positive
+          alt_ins = alt_ins - x(2,0);
         }
       }
     }
@@ -886,8 +843,8 @@ Eigen::Matrix<float,4,1> uNavINS::qmult(Eigen::Matrix<float,4,1> p, Eigen::Matri
 
 // bound yaw angle between -180 and 180
 float uNavINS::constrainAngle180(float dta) {
-  if(dta >  M_PI) dta -= (M_PI*2.0f);
-  if(dta < -M_PI) dta += (M_PI*2.0f);
+  while (dta >  M_PI) dta -= (M_PI * 2.0f);
+  while (dta < -M_PI) dta += (M_PI * 2.0f);
   return dta;
 }
 
@@ -899,95 +856,137 @@ float uNavINS::constrainAngle360(float dta){
   return dta;
 }
 
-// =============================================================================
-// SENSOR DELAY COMPENSATION - IMU Buffer Implementation
-// =============================================================================
-
-// Add IMU sample to circular buffer
-void uNavINS::addImuSample(double timestamp, float p, float q, float r, float ax, float ay, float az) {
-  imu_buffer[imu_buffer_head].timestamp = timestamp;
-  imu_buffer[imu_buffer_head].p = p;
-  imu_buffer[imu_buffer_head].q = q;
-  imu_buffer[imu_buffer_head].r = r;
-  imu_buffer[imu_buffer_head].ax = ax;
-  imu_buffer[imu_buffer_head].ay = ay;
-  imu_buffer[imu_buffer_head].az = az;
-  imu_buffer_head = (imu_buffer_head + 1) % IMU_BUFFER_SIZE;
-  if (imu_buffer_count < IMU_BUFFER_SIZE) {
-    imu_buffer_count++;
+// Apply error-state correction to navigation states. Mag bias is LPF-only.
+void uNavINS::applyNavigationCorrection(const Eigen::Matrix<float,18,1>& dx) {
+  denom = (1.0 - (ECC2 * pow(sin(lat_ins), 2.0)));
+  denom = sqrt(denom * denom);
+  Re = EARTH_RADIUS / sqrt(denom);
+  Rn = EARTH_RADIUS * (1.0 - ECC2) / denom * sqrt(denom);
+  alt_ins = alt_ins - dx(2, 0);
+  lat_ins = lat_ins + dx(0, 0) / (Re + alt_ins);
+  lon_ins = lon_ins + dx(1, 0) / (Rn + alt_ins) / cos(lat_ins);
+  vn_ins = vn_ins + dx(3, 0);
+  ve_ins = ve_ins + dx(4, 0);
+  vd_ins = vd_ins + dx(5, 0);
+  dq(0, 0) = 1.0f;
+  dq(1, 0) = dx(6, 0);
+  dq(2, 0) = dx(7, 0);
+  dq(3, 0) = dx(8, 0);
+  quat = qmult(quat, dq);
+  quat.normalize();
+  if (quat(0) < 0) {
+    quat = -1.0f * quat;
   }
+  float sin_theta = -2.0f * (quat(1, 0) * quat(3, 0) - quat(0, 0) * quat(2, 0));
+  if (sin_theta > 1.0f) sin_theta = 1.0f;
+  if (sin_theta < -1.0f) sin_theta = -1.0f;
+  theta = asinf(sin_theta);
+  phi = atan2f(2.0f * (quat(0, 0) * quat(1, 0) + quat(2, 0) * quat(3, 0)),
+               1.0f - 2.0f * (quat(1, 0) * quat(1, 0) + quat(2, 0) * quat(2, 0)));
+  psi = atan2f(2.0f * (quat(1, 0) * quat(2, 0) + quat(0, 0) * quat(3, 0)),
+               1.0f - 2.0f * (quat(2, 0) * quat(2, 0) + quat(3, 0) * quat(3, 0)));
+  abx = abx + dx(9, 0);
+  aby = aby + dx(10, 0);
+  abz = abz + dx(11, 0);
+  gbx = gbx + dx(12, 0);
+  gby = gby + dx(13, 0);
+  gbz = gbz + dx(14, 0);
 }
 
-// Compute scale factor for measurement noise based on GPS delay
-// Longer delays mean the GPS measurement is more stale and less reliable
+// =============================================================================
+// GPS interval noise scale
+// =============================================================================
+
 float uNavINS::computeDelayScaleFactor(float delay_seconds) {
-  // Scale factor increases with delay
-  // delay = 0ms → scale = 1.0 (nominal)
-  // delay = 200ms → scale ≈ 2.0
-  // delay = 500ms → scale ≈ 2.8
-  // Formula: scale = 1 + sqrt(delay / 0.2s)
-  float scale = 1.0f + sqrtf(delay_seconds / 0.2f);
-  return scale;
+  return 1.0f + sqrtf(delay_seconds / 0.2f);
 }
 
 // =============================================================================
-// REST DETECTION IMPLEMENTATION (VQF-inspired)
+// REST DETECTION (sliding window)
 // =============================================================================
 
-// Update rest detector with new IMU sample
-// Returns true if device is detected to be at rest
 bool uNavINS::RestDetector::update(float gx, float gy, float gz, float ax, float ay, float az) {
-  // Welford's online variance algorithm for numerical stability
-  sample_count++;
-  // Update gyro statistics
-  Eigen::Matrix<float,3,1> gyro_sample;
-  gyro_sample << gx, gy, gz;
-  Eigen::Matrix<float,3,1> gyro_delta = gyro_sample - gyro_mean;
-  gyro_mean += gyro_delta / (float)sample_count;
-  Eigen::Matrix<float,3,1> gyro_delta2 = gyro_sample - gyro_mean;
-  gyro_M2 = gyro_M2.array() + (gyro_delta.array() * gyro_delta2.array());
-  // Update accel statistics
-  Eigen::Matrix<float,3,1> accel_sample;
-  accel_sample << ax, ay, az;
-  Eigen::Matrix<float,3,1> accel_delta = accel_sample - accel_mean;
-  accel_mean += accel_delta / (float)sample_count;
-  Eigen::Matrix<float,3,1> accel_delta2 = accel_sample - accel_mean;
-  accel_M2 = accel_M2.array() + (accel_delta.array() * accel_delta2.array());
-  // Need minimum samples to compute variance
-  const int MIN_SAMPLES = 30;  // 0.5 seconds at 60 Hz
-  if (sample_count < MIN_SAMPLES) {
+  gx_buf[head] = gx;
+  gy_buf[head] = gy;
+  gz_buf[head] = gz;
+  ax_buf[head] = ax;
+  ay_buf[head] = ay;
+  az_buf[head] = az;
+  head = (head + 1) % WINDOW_SIZE;
+  if (count < WINDOW_SIZE) {
+    count++;
+  }
+
+  const int MIN_SAMPLES = 30;
+  if (count < MIN_SAMPLES) {
     is_at_rest = false;
     return false;
   }
-  // Compute variance (M2 / (n-1))
-  Eigen::Matrix<float,3,1> gyro_variance = gyro_M2 / (float)(sample_count - 1);
-  Eigen::Matrix<float,3,1> accel_variance = accel_M2 / (float)(sample_count - 1);
-  // Rest thresholds
-  const float GYRO_THRESHOLD_SQ = 0.0004f;  // (0.02 rad/s)² ≈ (1 deg/s)²
-  const float ACCEL_THRESHOLD_SQ = 0.25f;   // (0.5 m/s²)²
-  // Check if all axes are below threshold
-  bool gyro_still = (gyro_variance.array() < GYRO_THRESHOLD_SQ).all();
-  bool accel_still = (accel_variance.array() < ACCEL_THRESHOLD_SQ).all();
-  bool currently_still = gyro_still && accel_still;
-  // Require sustained stillness (hysteresis)
-  const int REST_SAMPLES_REQUIRED = 60;  // 1 second at 60 Hz
-  const int MOVING_SAMPLES_EXIT = 10;    // 0.17 seconds to exit rest
+
+  float gx_mean = 0, gy_mean = 0, gz_mean = 0;
+  float ax_mean = 0, ay_mean = 0, az_mean = 0;
+  for (int i = 0; i < count; i++) {
+    gx_mean += gx_buf[i];
+    gy_mean += gy_buf[i];
+    gz_mean += gz_buf[i];
+    ax_mean += ax_buf[i];
+    ay_mean += ay_buf[i];
+    az_mean += az_buf[i];
+  }
+  float inv = 1.0f / (float)count;
+  gx_mean *= inv; gy_mean *= inv; gz_mean *= inv;
+  ax_mean *= inv; ay_mean *= inv; az_mean *= inv;
+
+  float gx_var = 0, gy_var = 0, gz_var = 0;
+  float ax_var = 0, ay_var = 0, az_var = 0;
+  for (int i = 0; i < count; i++) {
+    float dgx = gx_buf[i] - gx_mean;
+    float dgy = gy_buf[i] - gy_mean;
+    float dgz = gz_buf[i] - gz_mean;
+    float dax = ax_buf[i] - ax_mean;
+    float day = ay_buf[i] - ay_mean;
+    float daz = az_buf[i] - az_mean;
+    gx_var += dgx * dgx;
+    gy_var += dgy * dgy;
+    gz_var += dgz * dgz;
+    ax_var += dax * dax;
+    ay_var += day * day;
+    az_var += daz * daz;
+  }
+  float inv_n1 = 1.0f / (float)(count - 1);
+  gx_var *= inv_n1; gy_var *= inv_n1; gz_var *= inv_n1;
+  ax_var *= inv_n1; ay_var *= inv_n1; az_var *= inv_n1;
+
+  const float GYRO_THRESHOLD_SQ = 0.0004f;  // (0.02 rad/s)^2
+  const float ACCEL_THRESHOLD_SQ = 0.25f;   // (0.5 m/s^2)^2
+  bool gyro_still = (gx_var < GYRO_THRESHOLD_SQ) && (gy_var < GYRO_THRESHOLD_SQ) && (gz_var < GYRO_THRESHOLD_SQ);
+  bool accel_still = (ax_var < ACCEL_THRESHOLD_SQ) && (ay_var < ACCEL_THRESHOLD_SQ) && (az_var < ACCEL_THRESHOLD_SQ);
+  float gyro_mean_sq = gx_mean * gx_mean + gy_mean * gy_mean + gz_mean * gz_mean;
+  const float GYRO_MEAN_SQ_LIMIT = 0.0025f; // (0.05 rad/s)^2 ≈ 3 deg/s
+  bool gyro_quiet = (gyro_mean_sq < GYRO_MEAN_SQ_LIMIT);
+  bool currently_still = gyro_still && accel_still && gyro_quiet;
+
+  const int REST_SAMPLES_REQUIRED = 60;
+  const int MOVING_SAMPLES_EXIT = 10;
   if (currently_still) {
+    motion_samples = 0;
     rest_samples++;
+    if (rest_samples > REST_SAMPLES_REQUIRED * 2) {
+      rest_samples = REST_SAMPLES_REQUIRED * 2;
+    }
     if (rest_samples >= REST_SAMPLES_REQUIRED) {
       is_at_rest = true;
     }
   } else {
-    rest_samples--;
-    if (rest_samples < -MOVING_SAMPLES_EXIT) {
+    rest_samples = 0;
+    motion_samples++;
+    if (motion_samples > MOVING_SAMPLES_EXIT * 2) {
+      motion_samples = MOVING_SAMPLES_EXIT * 2;
+    }
+    if (motion_samples >= MOVING_SAMPLES_EXIT) {
       is_at_rest = false;
-      // Reset statistics when motion detected
-      reset();
     }
   }
-  // Clamp rest_samples
-  if (rest_samples < -MOVING_SAMPLES_EXIT) rest_samples = -MOVING_SAMPLES_EXIT;
-  if (rest_samples > REST_SAMPLES_REQUIRED * 2) rest_samples = REST_SAMPLES_REQUIRED * 2;
   return is_at_rest;
 }
 
@@ -1123,12 +1122,15 @@ bool uNavINS::checkCovarianceHealth() {
   return (filter_health_status == 0);
 }
 
+bool uNavINS::isInitialized() {
+  return initialized;
+}
+
 bool uNavINS::isHealthy() {
-  return checkCovarianceHealth();
+  return filter_health_status == 0;
 }
 
 int uNavINS::getHealthStatus() {
-  checkCovarianceHealth();
   return filter_health_status;
 }
 

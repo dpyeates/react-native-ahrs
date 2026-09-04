@@ -101,14 +101,18 @@ describe('AhrsConfiguration', () => {
       config.setRotation('none');
 
       expect(NativeAhrs.setAhrsRotation).toHaveBeenCalledWith('none');
-      expect(logger.log).toHaveBeenCalledWith('🔄 Setting AHRS rotation to none');
+      expect(logger.log).toHaveBeenCalledWith(
+        '🔄 Setting AHRS rotation to none'
+      );
     });
 
     it('should set rotation to "left"', () => {
       config.setRotation('left');
 
       expect(NativeAhrs.setAhrsRotation).toHaveBeenCalledWith('left');
-      expect(logger.log).toHaveBeenCalledWith('🔄 Setting AHRS rotation to left');
+      expect(logger.log).toHaveBeenCalledWith(
+        '🔄 Setting AHRS rotation to left'
+      );
     });
 
     it('should set rotation to "right"', () => {
