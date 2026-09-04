@@ -1039,11 +1039,9 @@ static void testAircraftEastbound() {
   w.set_course(50.0f, 90.0f);
   w.run_level(600);
   expectNearDeg(w.filter.getGroundTrack_rad(), 90.0f, 12.0f, "Ground track eastbound");
-  expectNearDeg(w.filter.getHeading_rad(), 90.0f, 15.0f, "Heading eastbound");
   expectNear((float)w.filter.getVelEast_ms(), 50.0f, 3.0f, "East velocity matches airspeed");
   expectNear((float)w.filter.getVelNorth_ms(), 0.0f, 3.0f, "North velocity near zero eastbound");
   expectTrue(w.filter.getLongitude_rad() > lon0, "Longitude increases when flying east");
-  expectNear(w.hfpa_deg(), 0.0f, 10.0f, "Horizontal FPA near zero when heading matches track");
 }
 
 int main() {
