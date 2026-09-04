@@ -43,6 +43,8 @@ describe('AhrsCallbackManager', () => {
     positionValid: true,
     flightPhaseValid: false,
     filterHealthStatus: 0,
+    atRest: false,
+    zuptActive: false,
     ...overrides,
   });
 

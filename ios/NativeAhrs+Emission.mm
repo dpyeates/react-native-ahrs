@@ -175,6 +175,8 @@
     @"positionValid": @(self.hasGpsFix),
     @"flightPhaseValid": @(flightPhaseValid),
     @"filterHealthStatus": @(filterHealthStatus),
+    @"atRest": @(_filter->isAtRest()),
+    @"zuptActive": @(_filter->isZuptActive()),
   }];
   
   self.nextEmitTime = timestamp + (uint64_t)(1000000.0 / self.emitRateHz);
