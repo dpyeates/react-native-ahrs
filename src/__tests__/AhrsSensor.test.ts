@@ -12,8 +12,7 @@ import NativeAhrs from '../NativeAhrs';
 let storedAhrsCallback: ((data: AhrsData) => void) | null = null;
 let storedPlaybackCallback: ((event: PlaybackStateEvent) => void) | null = null;
 let storedXPlaneCallback:
-  | ((event: { connected: boolean; host: string }) => void)
-  | null = null;
+  ((event: { connected: boolean; host: string }) => void) | null = null;
 
 // Mock the native module with callback capture
 jest.mock('../NativeAhrs', () => ({
@@ -160,6 +159,9 @@ describe('AhrsSensor', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: false,
+        filterHealthStatus: 0,
+        atRest: false,
+        zuptActive: false,
       };
 
       emitAhrsData(mockData);
@@ -319,7 +321,6 @@ describe('AhrsSensor', () => {
       expect(NativeAhrs.levelAhrs).toHaveBeenCalledTimes(1);
     });
   });
-
 
   describe('setQNH', () => {
     it('should call native setQNH', () => {

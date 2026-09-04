@@ -112,16 +112,13 @@
   
   // If GPS accuracy is marginal (20-50m), be more cautious
   // Indoors, even "valid" GPS can have significant errors
-  if (latestLocation.horizontalAccuracy > 20.0f && latestLocation.horizontalAccuracy <= 50.0f) {
-    // GPS is marginal - reduce trust in velocity measurements
-    // If speed is very low but accuracy is poor, likely stationary
-    if (data.speed_ms < 0.2f) {
-      // Likely stationary but GPS is noisy - set speed to zero
-      data.speed_ms = 0.0f;
-      vel_n = 0.0f;
-      vel_e = 0.0f;
-      vel_d = 0.0f;
-      data.vs_ms = 0.0f;
+  if (latestLocation.horizontalAccuracy < 0.0 || latestLocation.horizontalAccuracy > 20.0f) {
+    // Indoor / poor GPS: do not finite-difference a phantom velocity
+    data.speed_ms = 0.0f;
+    data.track_deg = 0.0f;
+    data.vs_ms = 0.0f;
+    if (latestLocation.speedAccuracy < 0.0f || latestLocation.speedAccuracy > 2.0f) {
+      data.speedAccuracy_ms = 5.0f;
     }
   }
   

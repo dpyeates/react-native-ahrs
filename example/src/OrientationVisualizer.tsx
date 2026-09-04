@@ -11,12 +11,18 @@
  * - Heading display with bug indicator
  * - Flight Path Vector (FPV) symbol
  * - Aircraft symbol overlay
+ * - ALIGNING overlay while attitude is not yet valid
  *
  * @module OrientationVisualizer
  */
 
 import React, { useMemo } from 'react';
-import { View, StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  Text as RNText,
+  useWindowDimensions,
+} from 'react-native';
 import {
   Canvas,
   Circle,
@@ -113,6 +119,8 @@ interface Attitude {
   flightPathAngle: number;
   /** Horizontal flight path angle in degrees (sideslip/crab angle) */
   horizontalFlightPathAngle: number;
+  /** False while the EKF is still aligning or attitude is unhealthy */
+  attitudeValid?: boolean;
 }
 
 /**
@@ -167,14 +175,18 @@ function getVisiblePitchRange(
   pfdSize: number
 ): { min: number; max: number } {
   // Validate inputs to prevent NaN/invalid calculations
-  if (!Number.isFinite(pitchOffset) || !Number.isFinite(pfdSize) || pfdSize <= 0) {
+  if (
+    !Number.isFinite(pitchOffset) ||
+    !Number.isFinite(pfdSize) ||
+    pfdSize <= 0
+  ) {
     // Return full range if inputs are invalid
     return {
       min: LIMITS.PITCH_MIN,
       max: LIMITS.PITCH_MAX,
     };
   }
-  
+
   // Calculate how many degrees are visible above and below center
   const visibleDegrees = pfdSize / (2 * DIMENSIONS.PITCH_SCALE);
   // Round to 2.5-degree increments
@@ -190,8 +202,12 @@ function getVisiblePitchRange(
     ) * PITCH_INTERVALS.MINOR;
 
   // Ensure valid range is returned
-  const min = Number.isFinite(minPitch) ? Math.max(LIMITS.PITCH_MIN, minPitch) : LIMITS.PITCH_MIN;
-  const max = Number.isFinite(maxPitch) ? Math.min(LIMITS.PITCH_MAX, maxPitch) : LIMITS.PITCH_MAX;
+  const min = Number.isFinite(minPitch)
+    ? Math.max(LIMITS.PITCH_MIN, minPitch)
+    : LIMITS.PITCH_MIN;
+  const max = Number.isFinite(maxPitch)
+    ? Math.min(LIMITS.PITCH_MAX, maxPitch)
+    : LIMITS.PITCH_MAX;
 
   return {
     min,
@@ -324,7 +340,8 @@ function AircraftSymbol({ center }: { center: number }) {
  */
 function FPVSymbol({ x, y }: { x: number; y: number }) {
   // Calculate FPV symbol radius using extracted constant
-  const fpvRadius = (DIMENSIONS.FPV_SYMBOL_SIZE / 2) * DIMENSIONS.FPV_SYMBOL_SIZE_FACTOR;
+  const fpvRadius =
+    (DIMENSIONS.FPV_SYMBOL_SIZE / 2) * DIMENSIONS.FPV_SYMBOL_SIZE_FACTOR;
 
   return (
     <Group>
@@ -538,13 +555,11 @@ function OrientationVisualizer({ attitude }: Props) {
       // Handle NaN/undefined/null values by defaulting to 0
       const rollValue = Number.isFinite(attitude.roll) ? attitude.roll : 0;
       const pitchValue = Number.isFinite(attitude.pitch) ? attitude.pitch : 0;
-      const headingValue = Number.isFinite(attitude.heading) ? attitude.heading : 0;
-      
-      const rollClamped = clamp(
-        rollValue,
-        LIMITS.ROLL_MIN,
-        LIMITS.ROLL_MAX
-      );
+      const headingValue = Number.isFinite(attitude.heading)
+        ? attitude.heading
+        : 0;
+
+      const rollClamped = clamp(rollValue, LIMITS.ROLL_MIN, LIMITS.ROLL_MAX);
       const pitchClamped = clamp(
         pitchValue,
         LIMITS.PITCH_MIN,
@@ -658,7 +673,12 @@ function OrientationVisualizer({ attitude }: Props) {
   ]);
 
   return (
-    <View style={[styles.container, { backgroundColor: COLORS.SKY }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: COLORS.SKY, width: pfdSize, height: pfdSize },
+      ]}
+    >
       <Canvas style={{ width: pfdSize, height: pfdSize }}>
         {/* Artificial Horizon Group: rotate roll */}
         <Group
@@ -669,15 +689,29 @@ function OrientationVisualizer({ attitude }: Props) {
           {/* Always render ground/horizon with safe fallback if pitchOffset is invalid */}
           <Rect
             x={0 - pfdSize / 2}
-            y={Number.isFinite(center + pitchOffset) ? center + pitchOffset : center}
+            y={
+              Number.isFinite(center + pitchOffset)
+                ? center + pitchOffset
+                : center
+            }
             width={pfdSize * 2}
             height={pfdSize * 3}
             color={COLORS.GROUND}
           />
           {/* Horizon line */}
           <Line
-            p1={{ x: 0 - pfdSize / 2, y: Number.isFinite(center + pitchOffset) ? center + pitchOffset : center }}
-            p2={{ x: pfdSize + pfdSize / 2, y: Number.isFinite(center + pitchOffset) ? center + pitchOffset : center }}
+            p1={{
+              x: 0 - pfdSize / 2,
+              y: Number.isFinite(center + pitchOffset)
+                ? center + pitchOffset
+                : center,
+            }}
+            p2={{
+              x: pfdSize + pfdSize / 2,
+              y: Number.isFinite(center + pitchOffset)
+                ? center + pitchOffset
+                : center,
+            }}
             color={COLORS.STROKE}
             strokeWidth={DIMENSIONS.HORIZON_LINE_WIDTH}
           />
@@ -714,6 +748,11 @@ function OrientationVisualizer({ attitude }: Props) {
           font={headingFont}
         />
       </Canvas>
+      {!attitude.attitudeValid && (
+        <View style={styles.aligningOverlay} pointerEvents="none">
+          <RNText style={styles.aligningText}>ALIGNING</RNText>
+        </View>
+      )}
     </View>
   );
 }
@@ -722,6 +761,18 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  aligningOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  aligningText: {
+    color: COLORS.TEXT,
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 2,
   },
 });
 

@@ -11,27 +11,27 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
-    "@react-native-community/slider": "^5.1.2",
-    "@shopify/react-native-skia": "^2.4.16",
-    "react": "19.1.0",
-    "react-native": "0.83.1",
+    "@react-native-community/slider": "^5.2.1",
+    "@shopify/react-native-skia": "2.9.1",
+    "react": "19.2.8",
+    "react-native": "0.83.10",
     "react-native-orientation-director": "^2.6.5"
   },
   "devDependencies": {
-    "@babel/core": "^7.28.6",
-    "@babel/preset-env": "^7.28.6",
-    "@babel/runtime": "^7.28.6",
-    "@react-native-community/cli": "20.1.1",
-    "@react-native-community/cli-platform-android": "20.1.1",
-    "@react-native-community/cli-platform-ios": "20.1.1",
-    "@react-native/babel-preset": "0.83.1",
-    "@react-native/metro-config": "0.83.1",
-    "@react-native/typescript-config": "0.83.1",
-    "@types/react": "^19.2.10",
-    "react-native-builder-bob": "^0.40.17",
-    "react-native-monorepo-config": "^0.3.2"
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@babel/runtime": "^7.29.7",
+    "@react-native-community/cli": "20.2.0",
+    "@react-native-community/cli-platform-android": "20.2.0",
+    "@react-native-community/cli-platform-ios": "20.2.0",
+    "@react-native/babel-preset": "0.83.10",
+    "@react-native/metro-config": "0.83.10",
+    "@react-native/typescript-config": "0.83.10",
+    "@types/react": "^19.2.18",
+    "react-native-builder-bob": "^0.40.18",
+    "react-native-monorepo-config": "^0.3.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.4"
   }
 }

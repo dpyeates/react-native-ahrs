@@ -42,21 +42,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 // ENHANCEMENTS FROM BASELINE CHANGELOG
 // =============================================================================
 //
-// Enhancement 1: Full 3D magnetometer measurement with WMM expected field comparison
+// Enhancement 1: Tilt-compensated magnetometer heading with WMM
 // ------------------------------------------------------------------
 //  Expected Earth field in NED from World Magnetic Model (XYZgeomag)
-//  Measured field (after subtracting estimated mag bias) compared to expected field rotated into body frame
-//  Yaw error derived from comparison drives scalar heading update
+//  Measured field (after subtracting estimated mag bias) tilt-compensated to horizontal
+//  Scalar yaw error drives heading update only (roll/pitch from IMU/GPS)
 //
-// Enhancement 2: Sensor Delay Compensation
+// Enhancement 2: GPS rate-aware measurement noise
 // ------------------------------------------------------------------
-// GPS latency (100-300ms) compensation via:
-//   1. IMU sample buffering (40 samples, 667ms)
-//   2. Adaptive GPS delay estimation (50-500ms range)
-//   3. Delay-aware measurement noise scaling
-//
-// Key innovation: Scale GPS measurement noise based on delay, reducing trust in stale measurements.
-// Simpler and more stable than state replay approach. Supports variable GPS rates (0.5-10 Hz) automatically.
+// Scale GPS measurement noise from observed update interval.
+// This is not delayed-state replay; it only reduces trust in slow/stale GPS.
 //
 // Enhancement 3: GPS Adaptive Noise
 // ----------------------------------------------------------
@@ -117,7 +112,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //     * Phone in car mount at stoplight (engine vibration okay)
 //     * Phone on desk (truly motionless)
 //   - When active: observe velocity = [0,0,0] at 5 Hz with R = (0.1 m/s)²
-//   - Safety gate: only applies if 3D velocity < 3 m/s (prevents ZUPT during motion)
+//   - Safety gate: INS speed < 3 m/s when GPS is stale; when GPS confirms a stop,
+//     ZUPT may still pull back a diverged INS (up to ~80 m/s)
 //   - Tighter noise (0.05 m/s) when variance-based rest also detected
 //
 // 2. VARIANCE-BASED REST DETECTION (Supplementary - VQF-inspired)
@@ -264,6 +260,7 @@ class uNavINS {
     float getPitchStd_rad();
     float getYawStd_rad();
     // Filter health monitoring
+    bool isInitialized();
     bool isHealthy();
     int getHealthStatus();  // Returns health code: 0=healthy, 1=warning, 2=error, 3=critical
     // Rest detection and ZUPT
@@ -378,47 +375,33 @@ class uNavINS {
     Eigen::Matrix<float,4,1> quat = Eigen::Matrix<float,4,1>::Zero();
     // dquat
     Eigen::Matrix<float,4,1> dq = Eigen::Matrix<float,4,1>::Zero();
-    // Measurement innovation (9 measurements: 3 pos, 3 vel, 3 mag)
-    Eigen::Matrix<float,9,1> y = Eigen::Matrix<float,9,1>::Zero();
-    // Measurement noise covariance (9x9: GPS pos/vel + mag)
-    Eigen::Matrix<float,9,9> R = Eigen::Matrix<float,9,9>::Zero();
+    // GPS measurement innovation (6 measurements: 3 pos, 3 vel)
+    Eigen::Matrix<float,6,1> y = Eigen::Matrix<float,6,1>::Zero();
+    // GPS measurement noise covariance
+    Eigen::Matrix<float,6,6> R = Eigen::Matrix<float,6,6>::Zero();
     // State correction vector
     Eigen::Matrix<float,18,1> x = Eigen::Matrix<float,18,1>::Zero();
-    // Kalman Gain (18 states x 9 measurements)
-    Eigen::Matrix<float,18,9> K = Eigen::Matrix<float,18,9>::Zero();
-    // Measurement matrix (9 measurements x 18 states)
-    Eigen::Matrix<float,9,18> H = Eigen::Matrix<float,9,18>::Zero();
+    // Kalman Gain (18 states x 6 GPS measurements)
+    Eigen::Matrix<float,18,6> K = Eigen::Matrix<float,18,6>::Zero();
+    // GPS measurement matrix
+    Eigen::Matrix<float,6,18> H = Eigen::Matrix<float,6,18>::Zero();
     // Expected mag field in body frame (computed from C_N2B * mag_ned)
     Eigen::Matrix<float,3,1> mag_expected_body = Eigen::Matrix<float,3,1>::Zero();
 
-    // ==========================================================================
-    // SENSOR DELAY COMPENSATION - IMU Buffer
-    // ==========================================================================
-    // Buffer to store recent IMU samples (reserved for future advanced fusion)
-    // Currently populated but not used by delay-aware noise scaling implementation.
-    // Available for future enhancements requiring state replay.
-    struct ImuSample {
-      double timestamp; // Seconds since filter initialization
-      float p, q, r;    // Gyro rates (rad/s, raw - bias correction applied during use)
-      float ax, ay, az; // Accel (m/s², raw - bias correction applied during use)
-    };
-
-    static const int IMU_BUFFER_SIZE = 40; // ~667ms at 60 Hz
-    ImuSample imu_buffer[IMU_BUFFER_SIZE];
-    int imu_buffer_head = 0;  // Write position (next slot to fill)
-    int imu_buffer_count = 0; // Number of valid samples in buffer
     double filter_time = 0.0; // Time since initialization (seconds)
 
-    // GPS delay parameters
-    static constexpr float GPS_DELAY_NOMINAL = 0.200f;  // 200ms typical GPS latency
-    static constexpr float GPS_DELAY_MAX = 0.500f;      // Maximum expected GPS delay
-    static constexpr float GPS_DELAY_MIN = 0.050f;      // Minimum expected GPS delay
-    float gps_delay_estimate = GPS_DELAY_NOMINAL;       // Adaptive GPS delay estimate
-    double last_gps_fusion_time = 0.0;                  // Time of last GPS update
+    // GPS interval-based measurement-noise scale (not a delayed-state replay)
+    static constexpr float GPS_DELAY_NOMINAL = 0.200f;
+    static constexpr float GPS_DELAY_MAX = 0.500f;
+    static constexpr float GPS_DELAY_MIN = 0.050f;
+    float gps_delay_estimate = GPS_DELAY_NOMINAL;
+    double last_gps_fusion_time = 0.0;
+    bool gps_has_updated = false;
+    float last_gps_ground_speed = 0.0f;
+    bool have_gps_speed = false;
 
-    // Helper functions for IMU buffer and delayed fusion
-    void addImuSample(double timestamp, float p, float q, float r, float ax, float ay, float az);
     float computeDelayScaleFactor(float delay_seconds);
+    void applyNavigationCorrection(const Eigen::Matrix<float,18,1>& dx);
 
     // ==========================================================================
     // COVARIANCE HEALTH MONITORING
@@ -432,25 +415,27 @@ class uNavINS {
     // ==========================================================================
     // REST DETECTION (VQF-inspired)
     // ==========================================================================
-    // Detect when device is stationary for improved bias estimation
+    // Detect when device is stationary for improved bias estimation.
+    // Variance is computed over a sliding 1 s window so rest can exit after a long sit.
     struct RestDetector {
-      // Gyro variance tracking (rad²/s²)
-      Eigen::Matrix<float,3,1> gyro_mean;
-      Eigen::Matrix<float,3,1> gyro_M2;  // Sum of squared deviations
-      // Accel variance tracking (m²/s⁴)
-      Eigen::Matrix<float,3,1> accel_mean;
-      Eigen::Matrix<float,3,1> accel_M2;
-      int sample_count = 0;
+      static const int WINDOW_SIZE = 60; // 1 second at 60 Hz
+      float gx_buf[WINDOW_SIZE] = {};
+      float gy_buf[WINDOW_SIZE] = {};
+      float gz_buf[WINDOW_SIZE] = {};
+      float ax_buf[WINDOW_SIZE] = {};
+      float ay_buf[WINDOW_SIZE] = {};
+      float az_buf[WINDOW_SIZE] = {};
+      int head = 0;
+      int count = 0;
       int rest_samples = 0;
+      int motion_samples = 0;
       bool is_at_rest = false;
 
       void reset() {
-        gyro_mean.setZero();
-        gyro_M2.setZero();
-        accel_mean.setZero();
-        accel_M2.setZero();
-        sample_count = 0;
+        head = 0;
+        count = 0;
         rest_samples = 0;
+        motion_samples = 0;
         is_at_rest = false;
       }
 
@@ -458,13 +443,23 @@ class uNavINS {
     };
     RestDetector rest_detector;
 
+    // Magnetometer update state (must live on the instance so resetAhrs() clears it)
+    double last_mag_update_time = -1.0;
+    Eigen::Matrix<float,3,1> mag_meas_filtered = Eigen::Matrix<float,3,1>::Zero();
+    bool mag_filter_initialized = false;
+
+    // Barometer update rate limit
+    double last_baro_update_time = -1.0;
+    // Accelerometer tilt aid (when specific force is ~1 g)
+    double last_accel_tilt_time = -1.0;
+
     // ==========================================================================
     // SPEED-BASED ZUPT (Zero-Velocity Update)
     // ==========================================================================
     // Detect sustained low ground speed for stationary scenarios
     float low_speed_timer = 0.0f;   // seconds below speed threshold
     bool zupt_active = false;        // ZUPT currently enabled
-    float last_zupt_time = 0.0f;     // for rate limiting (5 Hz)
+    float last_zupt_time = -1.0f;    // for rate limiting (5 Hz)
 
     // skew symmetric
     Eigen::Matrix<float,3,3> sk(Eigen::Matrix<float,3,1> w);

@@ -426,7 +426,7 @@ static const NSInteger XPLANE_PORT = 8765;
           self.xplaneFirstGpsTimestampUs = timestamp;
         }
         // Update TOW with new GPS data
-        self.currentTow = (unsigned long)((timestamp - self.xplaneFirstGpsTimestampUs) / 1000ULL);
+        self.currentTow = (unsigned long)((timestamp - self.xplaneFirstGpsTimestampUs) / 1000ULL) + 1;
       }
     }
     
@@ -561,7 +561,7 @@ static const NSInteger XPLANE_PORT = 8765;
                     self.expectedMagD_nT   // Expected mag field D component (nT) from WMM
                     );
     
-    self.filterInitialized = YES;
+    self.filterInitialized = _filter->isInitialized();
     self.xplaneConnected = YES;
     self.xplaneReconnectAttempts = 0; // Reset reconnection attempts on successful connection
     [self emitXPlaneConnectionChanged:YES];

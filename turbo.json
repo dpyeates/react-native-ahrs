@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "pipeline": {
+  "tasks": {
     "build:android": {
       "env": ["ORG_GRADLE_PROJECT_newArchEnabled"],
       "inputs": [
@@ -23,6 +23,7 @@
         "package.json",
         "*.podspec",
         "ios",
+        "fusionml",
         "src/*.ts",
         "src/*.tsx",
         "example/package.json",

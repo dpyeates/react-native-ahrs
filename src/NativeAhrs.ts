@@ -38,7 +38,7 @@ export interface AhrsData {
   longitude?: number; // longitude in degrees
 
   // Flight phase
-  flightPhase: number; // 0=GROUND, 1=TAKEOFF, 2=CLIMB, 3=CRUISE, 4=DESCENT, 5=APPROACH, 6=LANDING
+  flightPhase: number; // 0=GROUND, 1=TAKEOFF_ROLL, 2=TAKEOFF, 3=CLIMB, 4=CRUISE, 5=DESCENT, 6=APPROACH, 7=LANDING, 8=LANDING_ROLL
   flightPhaseConfidence: number; // 0.0-1.0 confidence in current phase
 
   // Validity flags - indicate if outputs are reliable and should be used
@@ -49,6 +49,9 @@ export interface AhrsData {
 
   // Filter health (0=healthy, 1=warning, 2=error, 3=critical)
   filterHealthStatus: number;
+  // Stationary aids from the EKF
+  atRest: boolean; // IMU variance rest (desk-still)
+  zuptActive: boolean; // Speed-based zero-velocity update
 }
 
 /**

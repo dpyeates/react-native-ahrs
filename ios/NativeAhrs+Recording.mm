@@ -561,8 +561,10 @@
         self.lastLonRad = newLonRad;
         self.lastAltM = altM;
         self.lastGpsTimestampUs = timestamp;
-        // Update TOW with new GPS data
         self.currentTow = (unsigned long)(timestamp / 1000ULL);
+        [self updateMagneticDeclinationIfNeededForLatRad:self.lastLatRad
+                                                  lonRad:self.lastLonRad
+                                                    altM:self.lastAltM];
       }
     }
     
@@ -607,7 +609,7 @@
                     self.expectedMagD_nT
                     );
     
-    self.filterInitialized = YES;
+    self.filterInitialized = _filter->isInitialized();
   }
   
   [self emitAhrsUpdateWithTimestamp:timestamp];

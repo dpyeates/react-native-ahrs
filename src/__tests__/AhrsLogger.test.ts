@@ -65,7 +65,10 @@ describe('AhrsLogger', () => {
     it('should handle Error objects', () => {
       const error = new Error('test error');
       logger.error('An error occurred:', error);
-      expect(consoleSpy.error).toHaveBeenCalledWith('An error occurred:', error);
+      expect(consoleSpy.error).toHaveBeenCalledWith(
+        'An error occurred:',
+        error
+      );
     });
 
     it('should handle undefined and null arguments', () => {

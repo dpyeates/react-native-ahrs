@@ -28,7 +28,8 @@ Pod::Spec.new do |s|
                    "fusionml/src/uNavINS.{h,cpp}",
                    "fusionml/src/AltitudeCalculator.{h,cpp}",
                    "fusionml/src/FlightPhaseDetector.{h,cpp}",
-                   "fusionml/src/JsonRecorder.{h,cpp}"
+                   "fusionml/src/JsonRecorder.{h,cpp}",
+                   "fusionml/src/XYZgeomag.hpp"
   
   s.private_header_files = "ios/**/*.h",
                            "fusionml/src/uNavINS.h",
