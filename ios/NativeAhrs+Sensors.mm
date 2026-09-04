@@ -133,9 +133,8 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   // Recalculate if moved 1 nautical miles since last declination calc
   const double MIN_DISTANCE_FOR_DECLINATION_UPDATE_M = 1852.0;
   BOOL needDeclinationUpdate = NO;
-  
-  if (self.lastDeclinationLatRad == 0.0 && self.lastDeclinationLonRad == 0.0) {
-    // First time - always calculate
+
+  if (!self.hasDeclination) {
     needDeclinationUpdate = YES;
   } else {
     double distanceM = calculateDistanceMeters(self.lastDeclinationLatRad, self.lastDeclinationLonRad, latRad, lonRad);
@@ -151,6 +150,7 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
     self.magneticDeclination = declination;
     self.lastDeclinationLatRad = latRad;
     self.lastDeclinationLonRad = lonRad;
+    self.hasDeclination = YES;
     
     // Calculate expected magnetic field for EKF magnetometer measurement
     float bn_nT, be_nT, bd_nT;
@@ -311,7 +311,7 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   // Store latest forward acceleration for flight phase detection
   self.lastBodyAccelX = (float)body_accel_x;
   
-  self.filterInitialized = YES;
+  self.filterInitialized = _filter->isInitialized();
   [self emitAhrsUpdateWithTimestamp:timestamp_us];
 }
 

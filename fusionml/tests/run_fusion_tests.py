@@ -89,11 +89,12 @@ TESTS = [
 # -----------------------------------------------------------------------------
 
 def _get_compiler() -> str:
-    for name in ("clang++", "g++"):
+    # Prefer g++ on Linux (libstdc++ headers). clang++ may lack a C++ stdlib here.
+    for name in ("g++", "clang++"):
         path = shutil.which(name)
         if path:
             return path
-    raise RuntimeError("No C++ compiler found (tried clang++, g++)")
+    raise RuntimeError("No C++ compiler found (tried g++, clang++)")
 
 # -----------------------------------------------------------------------------
 # Build & run
@@ -172,10 +173,18 @@ def main() -> int:
         print(f"fusionml: {FUSIONML}")
 
     built: list[tuple[str, Path]] = []
+    build_failed: list[str] = []
     for name, test_cpp, sources, extra in TESTS:
         b = _build_one(compiler, name, test_cpp, sources, extra, args.verbose)
         if b is not None:
             built.append((name, b))
+        else:
+            build_failed.append(name)
+
+    if build_failed:
+        print(f"fusionml tests: {len(build_failed)} failed to build — {', '.join(build_failed)}", file=sys.stderr)
+        if not built:
+            return 1
 
     if not built:
         print("No tests built.", file=sys.stderr)
@@ -185,7 +194,7 @@ def main() -> int:
         print(f"Built {len(built)} test(s) under {BUILD_DIR}")
         return 0
 
-    failed: list[str] = []
+    failed: list[str] = list(build_failed)
     for name, binary in built:
         ok, out = _run_one(binary, args.verbose)
         if out.strip():

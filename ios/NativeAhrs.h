@@ -277,10 +277,16 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
 @property(nonatomic, assign) double magneticDeclination;
 
 /**
+ * @property hasDeclination
+ * @brief Whether WMM declination has been computed at least once
+ */
+@property(nonatomic, assign) BOOL hasDeclination;
+
+/**
  * @property lastDeclinationLatRad
  * @brief Latitude (radians) where last magnetic declination was calculated
  *
- * Used to determine when to recalculate declination (when moved 10+ nautical
+ * Used to determine when to recalculate declination (when moved 1+ nautical
  * miles).
  */
 @property(nonatomic, assign) double lastDeclinationLatRad;
@@ -289,7 +295,7 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
  * @property lastDeclinationLonRad
  * @brief Longitude (radians) where last magnetic declination was calculated
  *
- * Used to determine when to recalculate declination (when moved 10+ nautical
+ * Used to determine when to recalculate declination (when moved 1+ nautical
  * miles).
  */
 @property(nonatomic, assign) double lastDeclinationLonRad;
