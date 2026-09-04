@@ -10,6 +10,7 @@
  *   Walking     — pedestrian speed, corner, mag interference
  *   Car         — cruise, level yaw turn, stoplight, urban GPS
  *   Aircraft    — level, coordinated turn, 360° horizon, climb/baro, GPS outage
+ *   Outputs     — vertical/horizontal FPA, ground track, NED vel, lat/lon
  */
 
 #include <cmath>
@@ -157,6 +158,13 @@ struct World {
     ve = speed_ms * std::sin(h);
   }
 
+  // Velocity along a ground track that may differ from heading (crab / sideslip).
+  void set_velocity_track(float speed_ms, float track_deg) {
+    float t = wrap360(track_deg) * DEG_TO_RAD;
+    vn = speed_ms * std::cos(t);
+    ve = speed_ms * std::sin(t);
+  }
+
   void begin() {
     gps_vn = vn;
     gps_ve = ve;
@@ -209,6 +217,10 @@ struct World {
     double vd_i = filter.getVelDown_ms();
     return std::sqrt((float)(vn_i * vn_i + ve_i * ve_i + vd_i * vd_i));
   }
+
+  float fpa_deg() { return filter.getFlightPathAngle_rad() * RAD_TO_DEG; }
+  float hfpa_deg() { return filter.getHorizontalFlightPathAngle_rad() * RAD_TO_DEG; }
+  float track_deg() { return filter.getGroundTrack_rad() * RAD_TO_DEG; }
 };
 
 static SimulatedSensors walkSensors(float heading_deg, int i, float yaw_rate = 0.0f) {
@@ -325,6 +337,8 @@ static void testStaticDesk() {
   expectNearDeg(w.filter.getRoll_rad(), 0.0f, 5.0f, "Roll level on a desk");
   expectNearDeg(w.filter.getPitch_rad(), 0.0f, 5.0f, "Pitch level on a desk");
   expectTrue(w.filter.getHealthStatus() <= 1, "Health OK while static");
+  expectNear(w.fpa_deg(), 0.0f, 1.0f, "Vertical FPA is zero when stationary");
+  expectNear(w.hfpa_deg(), 0.0f, 1.0f, "Horizontal FPA is zero when stationary");
 }
 
 static void testStaticHandheld() {
@@ -392,6 +406,7 @@ static void testWalkingStraight() {
   expectNearDeg(w.filter.getRoll_rad(), 0.0f, 12.0f, "Roll roughly level while walking");
   expectNearDeg(w.filter.getPitch_rad(), 0.0f, 12.0f, "Pitch roughly level while walking");
   expectTrue(w.filter.getHealthStatus() <= 2, "Health not critical while walking");
+  expectNearDeg(w.filter.getGroundTrack_rad(), 0.0f, 25.0f, "Ground track follows walking heading");
 }
 
 static void testWalkingCorner() {
@@ -462,6 +477,11 @@ static void testCarCruise() {
   expectTrue(!w.filter.isZuptActive(), "ZUPT off while driving");
   expectTrue(!w.filter.isAtRest(), "Engine vibration is not rest while moving");
   expectTrue(w.filter.getHealthStatus() <= 1, "Health OK in a car");
+  expectNearDeg(w.filter.getGroundTrack_rad(), 0.0f, 15.0f, "Ground track northbound in a car");
+  expectNear((float)w.filter.getVelNorth_ms(), 20.0f, 2.5f, "North velocity matches car cruise");
+  expectNear((float)w.filter.getVelEast_ms(), 0.0f, 2.5f, "East velocity near zero northbound");
+  expectNear(w.fpa_deg(), 0.0f, 4.0f, "Vertical FPA near zero on level road");
+  expectNear(w.hfpa_deg(), 0.0f, 12.0f, "Horizontal FPA near zero when track matches heading");
 }
 
 static void testCarLevelTurn() {
@@ -641,6 +661,19 @@ static void testAircraftLevel() {
   expectTrue(w.filter.getPositionNorthStd_m() < 10.0f, "Position uncertainty bounded");
   expectTrue(w.filter.getRollStd_rad() * RAD_TO_DEG < 5.0f, "Attitude uncertainty reasonable");
   expectTrue(w.filter.getHealthStatus() <= 1, "Health OK in cruise");
+  expectNear(w.fpa_deg(), 0.0f, 3.0f, "Vertical FPA near zero in level cruise");
+  expectNear(w.hfpa_deg(), 0.0f, 8.0f, "Horizontal FPA near zero when coordinated");
+  expectNearDeg(w.filter.getGroundTrack_rad(), 0.0f, 10.0f, "Ground track northbound in cruise");
+  expectNear((float)w.filter.getVelNorth_ms(), 50.0f, 2.5f, "North velocity matches airspeed");
+  expectNear((float)w.filter.getVelEast_ms(), 0.0f, 2.5f, "East velocity near zero northbound");
+  expectNear((float)w.filter.getVelDown_ms(), 0.0f, 1.5f, "Down velocity near zero in level flight");
+  expectTrue(w.filter.getLatitude_rad() > 51.5 * DEG_TO_RAD,
+             "Latitude increases when flying north");
+  expectTrue(std::isfinite(w.filter.getGyroBiasX_rads()) &&
+                 std::isfinite(w.filter.getAccelBiasX_mss()) &&
+                 std::isfinite(w.filter.getMagBiasX_nT()),
+             "Bias estimates are finite in cruise");
+  expectTrue(w.filter.getVelocityNorthStd_ms() < 3.0f, "North velocity uncertainty bounded");
 }
 
 static void runAircraftRollIn(World &w, float target_bank, float roll_rate_deg_s,
@@ -731,6 +764,7 @@ static void testAircraftCoordinatedTurn() {
   runAircraftTurn(w, 300, bank, turn_rate);
   std::printf("  Roll during turn: %.2f°\n", w.filter.getRoll_rad() * RAD_TO_DEG);
   expectNearDeg(w.filter.getRoll_rad(), bank, 10.0f, "Roll tracks 30° bank");
+  expectNear(w.hfpa_deg(), 0.0f, 12.0f, "Horizontal FPA near zero in a coordinated turn");
 
   runAircraftRollOut(w, bank, roll_rate, turn_rate);
   w.run_level(300);
@@ -782,6 +816,9 @@ static void testAircraftClimb() {
   expectTrue(w.filter.getPitch_rad() * RAD_TO_DEG > 2.0f, "Pitch is nose-up in a climb");
   expectTrue((-w.filter.getVelDown_ms()) > 2.0f, "Vertical speed is positive in a climb");
   expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Wings level in a straight climb");
+  // atan2(5, 50) ≈ 5.7°
+  expectNear(w.fpa_deg(), 5.7f, 3.5f, "Vertical FPA is nose-up in a climb");
+  expectTrue(w.fpa_deg() > 2.0f, "Vertical FPA sign is climb");
 }
 
 static void testAircraftDescent() {
@@ -805,6 +842,9 @@ static void testAircraftDescent() {
   expectTrue(w.filter.getPitch_rad() * RAD_TO_DEG < -1.5f, "Pitch is nose-down in a descent");
   expectTrue((-w.filter.getVelDown_ms()) < -1.5f, "Vertical speed is negative in a descent");
   expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Wings level in a straight descent");
+  // atan2(-4, 50) ≈ -4.6°
+  expectNear(w.fpa_deg(), -4.6f, 3.5f, "Vertical FPA is nose-down in a descent");
+  expectTrue(w.fpa_deg() < -1.5f, "Vertical FPA sign is descent");
 }
 
 static void testAircraftAccelerate() {
@@ -964,6 +1004,48 @@ static void testAircraftMagIgnoredWhenBanked() {
   expectTrue(delta < 20.0f, "Banked mag error does not yank heading");
 }
 
+static void testAircraftCrab() {
+  std::printf("\n=== Aircraft: crab / horizontal FPA ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  w.heading_deg = 0.0f;
+  w.set_velocity_track(40.0f, 15.0f);  // heading north, track 15°
+  w.run_level(600);
+  std::printf("  HFPA: %.2f°  track: %.2f°  heading: %.2f°\n",
+              w.hfpa_deg(), w.track_deg(), w.filter.getHeading_rad() * RAD_TO_DEG);
+  expectNear(w.hfpa_deg(), 15.0f, 8.0f, "Horizontal FPA is +crab (drifting right)");
+  expectTrue(w.hfpa_deg() > 5.0f, "Positive crab has positive horizontal FPA");
+  expectNearDeg(w.filter.getGroundTrack_rad(), 15.0f, 10.0f, "Ground track follows velocity, not heading");
+  expectNearDeg(w.filter.getHeading_rad(), 0.0f, 20.0f, "Heading stays near nose-north during crab");
+
+  World left;
+  left.alt_m = 1000.0;
+  left.set_gps_hz(5);
+  left.heading_deg = 0.0f;
+  left.set_velocity_track(40.0f, 345.0f);  // -15°
+  left.run_level(600);
+  std::printf("  Left HFPA: %.2f°\n", left.hfpa_deg());
+  expectNear(left.hfpa_deg(), -15.0f, 8.0f, "Horizontal FPA is -crab (drifting left)");
+  expectTrue(left.hfpa_deg() < -5.0f, "Negative crab has negative horizontal FPA");
+}
+
+static void testAircraftEastbound() {
+  std::printf("\n=== Aircraft: eastbound track and longitude ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  double lon0 = w.lon_rad;
+  w.set_course(50.0f, 90.0f);
+  w.run_level(600);
+  expectNearDeg(w.filter.getGroundTrack_rad(), 90.0f, 12.0f, "Ground track eastbound");
+  expectNearDeg(w.filter.getHeading_rad(), 90.0f, 15.0f, "Heading eastbound");
+  expectNear((float)w.filter.getVelEast_ms(), 50.0f, 3.0f, "East velocity matches airspeed");
+  expectNear((float)w.filter.getVelNorth_ms(), 0.0f, 3.0f, "North velocity near zero eastbound");
+  expectTrue(w.filter.getLongitude_rad() > lon0, "Longitude increases when flying east");
+  expectNear(w.hfpa_deg(), 0.0f, 10.0f, "Horizontal FPA near zero when heading matches track");
+}
+
 int main() {
   std::printf("uNavINS use-case tests\n");
   std::printf("==========================================\n");
@@ -994,6 +1076,8 @@ int main() {
   testAircraftDecelerate();
   testAircraftClimb();
   testAircraftDescent();
+  testAircraftCrab();
+  testAircraftEastbound();
   testAircraftCoordinatedTurn();
   testAircraftClimbingTurn();
   testAircraftDescendingTurn();
