@@ -221,6 +221,22 @@ static SimulatedSensors walkSensors(float heading_deg, int i, float yaw_rate = 0
   return s;
 }
 
+static SimulatedSensors pitchedSensors(float heading_deg, float pitch_deg,
+                                       float pitch_rate = 0.0f, float yaw_rate = 0.0f) {
+  SimulatedSensors s = levelSensors(heading_deg, yaw_rate);
+  float th = pitch_deg * DEG_TO_RAD;
+  s.ax = G * std::sin(th);
+  s.ay = 0.0f;
+  s.az = -G * std::cos(th);
+  s.gy = pitch_rate;
+  s.gz = yaw_rate * std::cos(th);
+  float mx = s.mx;
+  float mz = s.mz;
+  s.mx = mx * std::cos(th) + mz * std::sin(th);
+  s.mz = -mx * std::sin(th) + mz * std::cos(th);
+  return s;
+}
+
 static SimulatedSensors carVibeSensors(float heading_deg, int i, float yaw_rate = 0.0f,
                                        float ax = 0.0f, float ay = 0.0f) {
   SimulatedSensors s = levelSensors(heading_deg, yaw_rate, ax, ay);
@@ -540,6 +556,71 @@ static void testCarUrbanGps() {
   expectNearDeg(poor.filter.getRoll_rad(), 0.0f, 10.0f, "Horizon holds with poor GPS");
 }
 
+static void testCarAccelerate() {
+  std::printf("\n=== Car: acceleration ===\n");
+  World w;
+  const float a = 2.0f;
+  float speed = 5.0f;
+  w.set_course(speed, 0.0f);
+  for (int i = 0; i < 60; i++) {
+    w.step(carVibeSensors(0.0f, i));
+  }
+  for (int i = 0; i < 300; i++) {  // 5 s → 15 m/s
+    speed += a * IMU_DT;
+    w.set_course(speed, 0.0f);
+    w.step(carVibeSensors(0.0f, i, 0.0f, a, 0.0f));
+  }
+  expectNear(w.speed(), 15.0f, 2.5f, "Speed tracks a 5→15 m/s pull");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Roll stays level while accelerating");
+  expectTrue(!w.filter.isZuptActive(), "ZUPT off while accelerating");
+}
+
+static void testCarDecelerate() {
+  std::printf("\n=== Car: deceleration ===\n");
+  World w;
+  const float a = -2.0f;
+  float speed = 20.0f;
+  w.set_course(speed, 0.0f);
+  for (int i = 0; i < 60; i++) {
+    w.step(carVibeSensors(0.0f, i));
+  }
+  for (int i = 0; i < 300; i++) {  // 5 s → 10 m/s
+    speed += a * IMU_DT;
+    w.set_course(speed, 0.0f);
+    w.step(carVibeSensors(0.0f, i, 0.0f, a, 0.0f));
+  }
+  expectNear(w.speed(), 10.0f, 2.5f, "Speed tracks a 20→10 m/s brake");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Roll stays level while braking");
+  expectTrue(!w.filter.isZuptActive(), "ZUPT off while still moving after a brake");
+}
+
+static void testCar360() {
+  std::printf("\n=== Car: 360° level turn ===\n");
+  World w;
+  const float speed = 15.0f;
+  const float radius = 50.0f;
+  const float yaw_rate = speed / radius;
+  w.set_course(speed, 0.0f);
+  for (int i = 0; i < 120; i++) {
+    w.step(carVibeSensors(w.heading_deg, i));
+  }
+  float max_roll = 0.0f;
+  int turn_iters = (int)((2.0f * (float)M_PI / yaw_rate) / IMU_DT);
+  for (int i = 0; i < turn_iters; i++) {
+    w.heading_deg = wrap360(w.heading_deg + yaw_rate * IMU_DT * RAD_TO_DEG);
+    w.set_course(speed, w.heading_deg);
+    float ay = speed * yaw_rate;
+    w.step(carVibeSensors(w.heading_deg, i, yaw_rate, 0.0f, ay));
+    float roll = std::fabs(w.filter.getRoll_rad() * RAD_TO_DEG);
+    if (roll > max_roll) max_roll = roll;
+  }
+  std::printf("  Max roll during 360° car turn: %.2f°  heading: %.1f°\n",
+              max_roll, w.filter.getHeading_rad() * RAD_TO_DEG);
+  expectTrue(max_roll < 15.0f, "360° car turn does not bank like an aircraft");
+  expectNearDeg(w.filter.getHeading_rad(), 0.0f, 35.0f, "Heading returns after a 360° car turn");
+  expectNear(w.speed(), speed, 3.0f, "Speed holds through a 360° car turn");
+}
+
 // ============================================================================
 // Aircraft
 // ============================================================================
@@ -667,6 +748,7 @@ static void testAircraftHorizon360() {
   const float bank = 30.0f;
   const float turn_rate = 6.0f;
   runAircraftRollIn(w, bank, 15.0f, turn_rate);
+  float heading_start = w.filter.getHeading_rad() * RAD_TO_DEG;
   float max_err = 0.0f;
   for (int seg = 0; seg < 6; seg++) {
     runAircraftTurn(w, 600, bank, turn_rate);
@@ -675,6 +757,132 @@ static void testAircraftHorizon360() {
     std::printf("  Segment %d roll error: %.2f°\n", seg + 1, err);
   }
   expectTrue(max_err < 30.0f, "Horizon stays within 30° over a 360° turn");
+  expectNearDeg(w.filter.getHeading_rad(), heading_start, 35.0f,
+                "Heading returns after a 360° aircraft turn");
+}
+
+static void testAircraftClimb() {
+  std::printf("\n=== Aircraft: climb ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  w.set_course(50.0f, 0.0f);
+  w.run_level(120);
+
+  const float pitch = 6.0f;
+  const float vs = 5.0f;  // m/s up
+  w.vd = -vs;
+  for (int i = 0; i < 600; i++) {  // 10 s → +50 m
+    w.step(pitchedSensors(0.0f, pitch));
+  }
+  std::printf("  Alt: %.1fm  pitch: %.2f°  vs: %.2f m/s\n",
+              w.filter.getAltitude_m(), w.filter.getPitch_rad() * RAD_TO_DEG,
+              (float)(-w.filter.getVelDown_ms()));
+  expectNear((float)w.filter.getAltitude_m(), 1050.0f, 12.0f, "Altitude rises ~50 m in a climb");
+  expectTrue(w.filter.getPitch_rad() * RAD_TO_DEG > 2.0f, "Pitch is nose-up in a climb");
+  expectTrue((-w.filter.getVelDown_ms()) > 2.0f, "Vertical speed is positive in a climb");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Wings level in a straight climb");
+}
+
+static void testAircraftDescent() {
+  std::printf("\n=== Aircraft: descent ===\n");
+  World w;
+  w.alt_m = 1200.0;
+  w.set_gps_hz(5);
+  w.set_course(50.0f, 0.0f);
+  w.run_level(120);
+
+  const float pitch = -5.0f;
+  const float vs = -4.0f;  // m/s down
+  w.vd = -vs;
+  for (int i = 0; i < 600; i++) {  // 10 s → -40 m
+    w.step(pitchedSensors(0.0f, pitch));
+  }
+  std::printf("  Alt: %.1fm  pitch: %.2f°  vs: %.2f m/s\n",
+              w.filter.getAltitude_m(), w.filter.getPitch_rad() * RAD_TO_DEG,
+              (float)(-w.filter.getVelDown_ms()));
+  expectNear((float)w.filter.getAltitude_m(), 1160.0f, 12.0f, "Altitude drops ~40 m in a descent");
+  expectTrue(w.filter.getPitch_rad() * RAD_TO_DEG < -1.5f, "Pitch is nose-down in a descent");
+  expectTrue((-w.filter.getVelDown_ms()) < -1.5f, "Vertical speed is negative in a descent");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 8.0f, "Wings level in a straight descent");
+}
+
+static void testAircraftAccelerate() {
+  std::printf("\n=== Aircraft: acceleration ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  float speed = 40.0f;
+  w.set_course(speed, 0.0f);
+  w.run_level(60);
+  const float a = 1.5f;
+  for (int i = 0; i < 300; i++) {  // 5 s → 47.5 m/s
+    speed += a * IMU_DT;
+    w.set_course(speed, 0.0f);
+    w.step(levelSensors(0.0f, 0.0f, a, 0.0f));
+  }
+  expectNear(w.speed(), 47.5f, 3.0f, "Speed tracks a 40→47.5 m/s acceleration");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 6.0f, "Wings level while accelerating");
+}
+
+static void testAircraftDecelerate() {
+  std::printf("\n=== Aircraft: deceleration ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  float speed = 55.0f;
+  w.set_course(speed, 0.0f);
+  w.run_level(60);
+  const float a = -1.5f;
+  for (int i = 0; i < 300; i++) {  // 5 s → 47.5 m/s
+    speed += a * IMU_DT;
+    w.set_course(speed, 0.0f);
+    w.step(levelSensors(0.0f, 0.0f, a, 0.0f));
+  }
+  expectNear(w.speed(), 47.5f, 3.0f, "Speed tracks a 55→47.5 m/s deceleration");
+  expectNearDeg(w.filter.getRoll_rad(), 0.0f, 6.0f, "Wings level while decelerating");
+}
+
+static void testAircraftClimbingTurn() {
+  std::printf("\n=== Aircraft: climbing turn ===\n");
+  World w;
+  w.alt_m = 1000.0;
+  w.set_gps_hz(5);
+  w.set_course(50.0f, 0.0f);
+  w.run_level(120);
+  double alt0 = w.filter.getAltitude_m();
+  const float bank = 25.0f;
+  const float turn_rate = 6.0f;
+  w.vd = -3.0;  // 3 m/s climb
+  runAircraftRollIn(w, bank, 15.0f, turn_rate);
+  runAircraftTurn(w, 300, bank, turn_rate);  // 5 s, +15 m, ~30° heading
+  std::printf("  Roll: %.1f°  heading: %.1f°  alt: %.1fm  vs: %.2f\n",
+              w.filter.getRoll_rad() * RAD_TO_DEG, w.filter.getHeading_rad() * RAD_TO_DEG,
+              w.filter.getAltitude_m(), (float)(-w.filter.getVelDown_ms()));
+  expectNearDeg(w.filter.getRoll_rad(), bank, 12.0f, "Roll tracks bank in a climbing turn");
+  expectTrue(w.filter.getAltitude_m() > alt0 + 8.0, "Altitude increases in a climbing turn");
+  expectTrue((-w.filter.getVelDown_ms()) > 1.0f, "Climbing turn has positive vertical speed");
+}
+
+static void testAircraftDescendingTurn() {
+  std::printf("\n=== Aircraft: descending turn ===\n");
+  World w;
+  w.alt_m = 1200.0;
+  w.set_gps_hz(5);
+  w.set_course(50.0f, 0.0f);
+  w.run_level(120);
+  double alt0 = w.filter.getAltitude_m();
+  const float bank = 25.0f;
+  const float turn_rate = 6.0f;
+  w.vd = 3.0;  // 3 m/s descent
+  runAircraftRollIn(w, bank, 15.0f, turn_rate);
+  runAircraftTurn(w, 300, bank, turn_rate);
+  std::printf("  Roll: %.1f°  heading: %.1f°  alt: %.1fm  vs: %.2f\n",
+              w.filter.getRoll_rad() * RAD_TO_DEG, w.filter.getHeading_rad() * RAD_TO_DEG,
+              w.filter.getAltitude_m(), (float)(-w.filter.getVelDown_ms()));
+  expectNearDeg(w.filter.getRoll_rad(), bank, 12.0f, "Roll tracks bank in a descending turn");
+  expectTrue(w.filter.getAltitude_m() < alt0 - 8.0, "Altitude decreases in a descending turn");
+  expectTrue((-w.filter.getVelDown_ms()) < -1.0f, "Descending turn has negative vertical speed");
 }
 
 static void testAircraftClimbBaro() {
@@ -774,12 +982,21 @@ int main() {
   testWalkingMagInterference();
 
   testCarCruise();
+  testCarAccelerate();
+  testCarDecelerate();
   testCarLevelTurn();
+  testCar360();
   testCarStoplight();
   testCarUrbanGps();
 
   testAircraftLevel();
+  testAircraftAccelerate();
+  testAircraftDecelerate();
+  testAircraftClimb();
+  testAircraftDescent();
   testAircraftCoordinatedTurn();
+  testAircraftClimbingTurn();
+  testAircraftDescendingTurn();
   testAircraftHorizon360();
   testAircraftClimbBaro();
   testAircraftGpsOutage();
