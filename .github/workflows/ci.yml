@@ -95,7 +95,14 @@ jobs:
         run: |
           test -n "$ANDROID_HOME"
           echo "sdk.dir=$ANDROID_HOME" > example/android/local.properties
-          /bin/bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          # RN 0.83 pins NDK 27.1; install it here so Gradle does not download a bad zip
+          for attempt in 1 2 3; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.1.12297006" && break
+            echo "NDK install attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 8))
+          done
+          test -d "$ANDROID_HOME/ndk/27.1.12297006"
 
       - name: Cache Gradle
         if: env.turbo_cache_hit != 1
@@ -155,7 +162,7 @@ jobs:
           cd example
           bundle install
           bundle exec pod repo update --verbose
-          bundle exec pod install --project-directory=ios
+          bundle exec pod update --project-directory=ios
 
       - name: Build example for iOS
         run: |
