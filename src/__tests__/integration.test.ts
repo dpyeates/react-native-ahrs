@@ -111,6 +111,7 @@ describe('AHRS Integration Tests', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: false,
+        filterHealthStatus: 0,
       };
 
       // Simulate native module emitting data
@@ -472,6 +473,7 @@ describe('AHRS Integration Tests', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: true,
+        filterHealthStatus: 0,
       };
 
       emitAhrsData(fullData);

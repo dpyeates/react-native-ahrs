@@ -42,6 +42,7 @@ describe('AhrsCallbackManager', () => {
     altitudeValid: true,
     positionValid: true,
     flightPhaseValid: false,
+    filterHealthStatus: 0,
     ...overrides,
   });
 

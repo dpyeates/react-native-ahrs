@@ -160,6 +160,7 @@ describe('AhrsSensor', () => {
         altitudeValid: true,
         positionValid: true,
         flightPhaseValid: false,
+        filterHealthStatus: 0,
       };
 
       emitAhrsData(mockData);
