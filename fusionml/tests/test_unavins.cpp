@@ -65,6 +65,32 @@ static const float RAD_TO_DEG = 180.0f / (float)M_PI;
 static const float IMU_DT = 1.0f / 60.0f;
 static const int IMU_HZ = 60;
 static const double EARTH_R = 6378137.0;
+// NED field matching World::bn/be/bd (nT / 1000). Used for body-frame mag.
+static const float MAG_N_UT = 19.0f;
+static const float MAG_E_UT = -1.0f;
+static const float MAG_D_UT = 45.0f;
+
+// Rotate NED mag into body (X fwd, Y right, Z down). C_N2B = Rx(roll)*Ry(pitch)*Rz(yaw)
+// with Ry chosen so a level pitched-up IMU reads ax = G*sin(pitch).
+static void nedMagToBody(float heading_deg, float pitch_deg, float roll_deg,
+                         float *mx, float *my, float *mz) {
+  float yaw = heading_deg * DEG_TO_RAD;
+  float th = pitch_deg * DEG_TO_RAD;
+  float ph = roll_deg * DEG_TO_RAD;
+  float cy = std::cos(yaw), sy = std::sin(yaw);
+  float ct = std::cos(th), st = std::sin(th);
+  float cp = std::cos(ph), sp = std::sin(ph);
+  float n = MAG_N_UT, e = MAG_E_UT, d = MAG_D_UT;
+  float xn = cy * n + sy * e;
+  float yn = -sy * n + cy * e;
+  float zn = d;
+  float xp = ct * xn - st * zn;
+  float yp = yn;
+  float zp = st * xn + ct * zn;
+  *mx = xp;
+  *my = cp * yp + sp * zp;
+  *mz = -sp * yp + cp * zp;
+}
 
 struct SimulatedSensors {
   float ax, ay, az;
@@ -78,7 +104,7 @@ static float wrap360(float deg) {
   return deg;
 }
 
-// Level, z-down specific force. Mag is a simplified 20/40 µT field along heading.
+// Level, z-down specific force. Mag is the World NED field rotated into body.
 static SimulatedSensors levelSensors(float heading_deg, float yaw_rate_rads = 0.0f,
                                      float ax = 0.0f, float ay = 0.0f) {
   SimulatedSensors s;
@@ -88,10 +114,7 @@ static SimulatedSensors levelSensors(float heading_deg, float yaw_rate_rads = 0.
   s.gx = 0.0f;
   s.gy = 0.0f;
   s.gz = yaw_rate_rads;
-  float heading_rad = heading_deg * DEG_TO_RAD;
-  s.mx = 20.0f * std::cos(heading_rad);
-  s.my = 20.0f * std::sin(heading_rad);
-  s.mz = 40.0f;
+  nedMagToBody(heading_deg, 0.0f, 0.0f, &s.mx, &s.my, &s.mz);
   return s;
 }
 
@@ -107,15 +130,7 @@ static SimulatedSensors coordinatedTurnSensors(float heading_deg, float bank_deg
   s.gx = 0.0f;
   s.gy = turn_rate_rad * std::sin(bank_rad);
   s.gz = turn_rate_rad * std::cos(bank_rad);
-  float heading_rad = heading_deg * DEG_TO_RAD;
-  float Bn = 20.0f, Be = 0.0f, Bd = 40.0f;
-  float mx_n = Bn * std::cos(heading_rad) + Be * std::sin(heading_rad);
-  float my_n = -Bn * std::sin(heading_rad) + Be * std::cos(heading_rad);
-  float cb = std::cos(bank_rad);
-  float sb = std::sin(bank_rad);
-  s.mx = mx_n;
-  s.my = my_n * cb + Bd * sb;
-  s.mz = -my_n * sb + Bd * cb;
+  nedMagToBody(heading_deg, 0.0f, bank_deg, &s.mx, &s.my, &s.mz);
   return s;
 }
 
@@ -242,10 +257,7 @@ static SimulatedSensors pitchedSensors(float heading_deg, float pitch_deg,
   s.az = -G * std::cos(th);
   s.gy = pitch_rate;
   s.gz = yaw_rate * std::cos(th);
-  float mx = s.mx;
-  float mz = s.mz;
-  s.mx = mx * std::cos(th) + mz * std::sin(th);
-  s.mz = -mx * std::sin(th) + mz * std::cos(th);
+  nedMagToBody(heading_deg, pitch_deg, 0.0f, &s.mx, &s.my, &s.mz);
   return s;
 }
 
@@ -298,6 +310,22 @@ static void testInitZeroMag() {
   expectTrue(std::isfinite(filter.getHeading_rad()), "Heading finite without mag");
   expectTrue(std::isfinite(filter.getRoll_rad()) && std::isfinite(filter.getPitch_rad()),
              "Roll/pitch finite without mag");
+}
+
+static void testInitHeadingCardinals() {
+  std::printf("\n=== Init: cardinal magnetic headings ===\n");
+  const float headings[] = {0.0f, 90.0f, 180.0f, 270.0f};
+  for (int i = 0; i < 4; i++) {
+    float hdg = headings[i];
+    uNavINS filter;
+    SimulatedSensors s = levelSensors(hdg);
+    filter.update(0.0, 0, 0, 0, 0, 0.9, 0.1, 20,
+                  s.gx, s.gy, s.gz, s.ax, s.ay, s.az, s.mx, s.my, s.mz,
+                  MAG_N_UT * 1000.0f, MAG_E_UT * 1000.0f, MAG_D_UT * 1000.0f);
+    char msg[80];
+    std::snprintf(msg, sizeof(msg), "Init heading at %.0f°", hdg);
+    expectNearDeg(filter.getHeading_rad(), hdg, 8.0f, msg);
+  }
 }
 
 static void testInitIndependentInstances() {
@@ -695,13 +723,8 @@ static void runAircraftRollIn(World &w, float target_bank, float roll_rate_deg_s
     s.gx = bank_step / IMU_DT * DEG_TO_RAD;
     s.gy = partial_turn * DEG_TO_RAD * std::sin(bank_rad);
     s.gz = partial_turn * DEG_TO_RAD * std::cos(bank_rad);
-    float h = w.heading_deg * DEG_TO_RAD;
-    float cb = std::cos(bank_rad);
-    float sb = std::sin(bank_rad);
-    s.mx = 20.0f * std::cos(h);
-    s.my = 20.0f * std::sin(h) * cb + 40.0f * sb;
-    s.mz = -20.0f * std::sin(h) * sb + 40.0f * cb;
     w.heading_deg = wrap360(w.heading_deg + partial_turn * IMU_DT);
+    nedMagToBody(w.heading_deg, 0.0f, bank, &s.mx, &s.my, &s.mz);
     w.set_course(airspeed, w.heading_deg);
     w.step(s);
   }
@@ -738,12 +761,7 @@ static void runAircraftRollOut(World &w, float current_bank, float roll_rate_deg
     s.gy = decaying * std::sin(bank_rad);
     s.gz = decaying * std::cos(bank_rad);
     w.heading_deg = wrap360(w.heading_deg + turn_rate_deg_s * frac * IMU_DT);
-    float h = w.heading_deg * DEG_TO_RAD;
-    float cb = std::cos(bank_rad);
-    float sb = std::sin(bank_rad);
-    s.mx = 20.0f * std::cos(h);
-    s.my = 20.0f * std::sin(h) * cb + 40.0f * sb;
-    s.mz = -20.0f * std::sin(h) * sb + 40.0f * cb;
+    nedMagToBody(w.heading_deg, 0.0f, bank, &s.mx, &s.my, &s.mz);
     w.set_course(airspeed, w.heading_deg);
     w.step(s);
   }
@@ -1039,9 +1057,11 @@ static void testAircraftEastbound() {
   w.set_course(50.0f, 90.0f);
   w.run_level(600);
   expectNearDeg(w.filter.getGroundTrack_rad(), 90.0f, 12.0f, "Ground track eastbound");
+  expectNearDeg(w.filter.getHeading_rad(), 90.0f, 15.0f, "Heading eastbound");
   expectNear((float)w.filter.getVelEast_ms(), 50.0f, 3.0f, "East velocity matches airspeed");
   expectNear((float)w.filter.getVelNorth_ms(), 0.0f, 3.0f, "North velocity near zero eastbound");
   expectTrue(w.filter.getLongitude_rad() > lon0, "Longitude increases when flying east");
+  expectNear(w.hfpa_deg(), 0.0f, 10.0f, "Horizontal FPA near zero when heading matches track");
 }
 
 int main() {
@@ -1051,6 +1071,7 @@ int main() {
   testInitFirstSampleDtZero();
   testInitRejectsBadAccel();
   testInitZeroMag();
+  testInitHeadingCardinals();
   testInitIndependentInstances();
 
   testStaticDesk();
