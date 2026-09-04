@@ -255,8 +255,9 @@ Java_com_ahrs_AhrsModule_resetAhrs(JNIEnv *env, jobject thiz, jlong ekfPtr) {
   FilterContext *ctx = ctxFrom(ekfPtr);
   if (!ctx) return;
   std::lock_guard<std::mutex> lock(g_mutex);
-  ctx->filter = uNavINS();
-  ctx->phase = FlightPhaseDetector();
+  ctx->filter.~uNavINS();
+  new (&ctx->filter) uNavINS();
+  ctx->phase.reset();
   ctx->last_update_us = 0;
   ctx->roll_offset_deg = 0.0f;
   ctx->pitch_offset_deg = 0.0f;
