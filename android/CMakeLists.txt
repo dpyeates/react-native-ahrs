@@ -35,7 +35,6 @@ add_library(ahrs SHARED
     ../fusionml/src/AltitudeCalculator.cpp
     ../fusionml/src/FlightPhaseDetector.cpp
     ../fusionml/src/JsonRecorder.cpp
-    "${RN_DIR}/ReactCommon/jsi/jsi/jsi.cpp"
 )
 
 # Specify include directories

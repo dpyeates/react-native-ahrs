@@ -1,47 +1,75 @@
 #include <jni.h>
-#include <jsi/jsi.h>
-#include <memory>
-#include <mutex>
-#include <chrono>
 #include <android/log.h>
-#include <android/location.h>
 #include <cmath>
+#include <cstdint>
+#include <ctime>
+#include <limits>
+#include <mutex>
+#include <new>
 
-#include "../fusion/ekf.h"
-#include "../fusion/ekf_core.h"
-#include "../fusion/ekf_math.h"
-#include "../fusion/ekf_flight_phase.h"
+#include "AltitudeCalculator.h"
+#include "FlightPhaseDetector.h"
+#include "XYZgeomag.hpp"
+#include "uNavINS.h"
 
 #define LOG_TAG "AhrsModuleJNI"
 #ifdef DEBUG
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #define LOGI(...) ((void)0)
-#define LOGE(...) ((void)0)
+#endif
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
 #endif
 
-using namespace facebook::jsi;
+static const double RAD2DEG = 180.0 / M_PI;
+static const double DEG2RAD = M_PI / 180.0;
+static const float MIN_GROUND_SPEED_FOR_TRACK = 0.514444f; // 1 kt
+static const float MIN_SPEED_FOR_FPV = 2.57222f;           // 5 kt
+static const double MIN_DECLINATION_UPDATE_M = 1852.0;
 
-// Global EKF instance (using stack-allocated struct)
-static ekf_t* g_ekf = nullptr;
-static std::mutex g_ekf_mutex;
-
-// Rotation enum matching iOS
 enum AhrsRotation {
   AHR_ROTATION_VERTICAL = 0,
   AHR_ROTATION_LEFT = 1,
   AHR_ROTATION_RIGHT = 2
 };
 
-static AhrsRotation g_rotation = AHR_ROTATION_VERTICAL;
-static bool g_ekf_attitude_initialized = false;
-static uint64_t g_last_update_us = 0;
+struct FilterContext {
+  uNavINS filter;
+  FlightPhaseDetector phase;
+  AhrsRotation rotation = AHR_ROTATION_VERTICAL;
+  uint64_t last_update_us = 0;
+  float qnh_hpa = 1013.25f;
+  float roll_offset_deg = 0.0f;
+  float pitch_offset_deg = 0.0f;
+  bool has_declination = false;
+  double last_decl_lat = 0.0;
+  double last_decl_lon = 0.0;
+  float declination_deg = 0.0f;
+  float bn = NAN;
+  float be = NAN;
+  float bd = NAN;
+  bool has_gps = false;
+  double last_lat_rad = 0.0;
+  double last_lon_rad = 0.0;
+  double last_alt_m = 0.0;
+  float last_track_deg = 0.0f;
+  bool has_track = false;
+  float last_body_ax = 0.0f;
+  float last_baro_hpa = -1.0f;
+};
 
-// Transform Android sensor readings to aviation body frame
+static std::mutex g_mutex;
+
+static FilterContext *ctxFrom(jlong ptr) {
+  return reinterpret_cast<FilterContext *>(ptr);
+}
+
 static void transformToBodyFrame(float android_x, float android_y, float android_z,
                                  AhrsRotation rotation,
-                                 float* out_x, float* out_y, float* out_z) {
+                                 float *out_x, float *out_y, float *out_z) {
   switch (rotation) {
     case AHR_ROTATION_LEFT:
       *out_x = -android_z;
@@ -62,40 +90,77 @@ static void transformToBodyFrame(float android_x, float android_y, float android
   }
 }
 
+static float wrap360(float deg) {
+  while (deg >= 360.0f) deg -= 360.0f;
+  while (deg < 0.0f) deg += 360.0f;
+  return deg;
+}
+
+static double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
+  const double R = 6378137.0;
+  double dLat = lat2 - lat1;
+  double dLon = lon2 - lon1;
+  double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
+             std::cos(lat1) * std::cos(lat2) * std::sin(dLon / 2.0) * std::sin(dLon / 2.0);
+  return R * 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+}
+
+static float currentDecimalYear() {
+  time_t now = time(nullptr);
+  struct tm t{};
+  gmtime_r(&now, &t);
+  return (float)(t.tm_year + 1900) + ((float)t.tm_yday / 365.25f);
+}
+
+static void updateWmmIfNeeded(FilterContext *ctx, double lat_rad, double lon_rad, double alt_m) {
+  if (!std::isfinite(lat_rad) || !std::isfinite(lon_rad) || !std::isfinite(alt_m)) {
+    return;
+  }
+  if (std::fabs(lat_rad) < 1e-8 && std::fabs(lon_rad) < 1e-8) {
+    return;
+  }
+  bool need = !ctx->has_declination;
+  if (!need) {
+    need = haversineMeters(ctx->last_decl_lat, ctx->last_decl_lon, lat_rad, lon_rad) >=
+           MIN_DECLINATION_UPDATE_M;
+  }
+  if (!need) {
+    return;
+  }
+  double lat_deg = lat_rad * RAD2DEG;
+  double lon_deg = lon_rad * RAD2DEG;
+  float year = currentDecimalYear();
+  geomag::Vector position = geomag::geodetic2ecef((float)lat_deg, (float)lon_deg, (float)alt_m);
+  geomag::Vector magField = geomag::GeoMag(year, position, geomag::WMM2025);
+  geomag::Elements elements = geomag::magField2Elements(magField, (float)lat_deg, (float)lon_deg);
+  ctx->declination_deg = elements.declination;
+  ctx->bn = elements.north;
+  ctx->be = elements.east;
+  ctx->bd = elements.down;
+  ctx->last_decl_lat = lat_rad;
+  ctx->last_decl_lon = lon_rad;
+  ctx->has_declination = true;
+  LOGI("WMM declination %.1f deg  N=%.0f E=%.0f D=%.0f nT",
+       ctx->declination_deg, ctx->bn, ctx->be, ctx->bd);
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_ahrs_AhrsModule_initAhrs(JNIEnv *env, jobject thiz) {
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  if (g_ekf) {
-    delete g_ekf;
-  }
-  
-  g_ekf = new ekf_t();
-  if (!g_ekf) {
-    LOGE("Failed to allocate EKF");
+  std::lock_guard<std::mutex> lock(g_mutex);
+  auto *ctx = new (std::nothrow) FilterContext();
+  if (!ctx) {
+    LOGE("Failed to allocate filter context");
     return 0;
   }
-  
-  ekf_init(g_ekf);
-  g_ekf_attitude_initialized = false;
-  g_last_update_us = 0;
-  
-  LOGI("EKF initialized successfully");
-  return reinterpret_cast<jlong>(g_ekf);
+  LOGI("uNavINS initialized");
+  return reinterpret_cast<jlong>(ctx);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_ahrs_AhrsModule_destroyAhrs(JNIEnv *env, jobject thiz) {
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  if (g_ekf) {
-    delete g_ekf;
-    g_ekf = nullptr;
-  }
-  
-  g_ekf_attitude_initialized = false;
-  g_last_update_us = 0;
-  LOGI("EKF destroyed");
+Java_com_ahrs_AhrsModule_destroyAhrs(JNIEnv *env, jobject thiz, jlong ekfPtr) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  delete ctxFrom(ekfPtr);
+  LOGI("uNavINS destroyed");
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -107,343 +172,256 @@ Java_com_ahrs_AhrsModule_updateAhrs(JNIEnv *env, jobject thiz,
                                     jfloatArray mag,
                                     jfloatArray gps,
                                     jfloatArray baro) {
-  if (!ekfPtr) return;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  
-  // Extract sensor data
-  jfloat* accelData = env->GetFloatArrayElements(accel, nullptr);
-  jfloat* gyroData = env->GetFloatArrayElements(gyro, nullptr);
-  jfloat* magData = env->GetFloatArrayElements(mag, nullptr);
-  
-  // Transform accelerometer (Android gives m/s², convert to body frame)
-  float acc_x, acc_y, acc_z;
-  transformToBodyFrame(accelData[0], accelData[1], accelData[2],
-                       g_rotation, &acc_x, &acc_y, &acc_z);
-  
-  vector3_t accel_vec;
-  accel_vec.x = acc_x;
-  accel_vec.y = acc_y;
-  accel_vec.z = acc_z;
-  accel_vec.valid = true;
-  accel_vec.timestamp_us = timestampUs;
-  
-  // Transform gyroscope (Android gives rad/s, transform to body frame)
-  float gyro_x, gyro_y, gyro_z;
-  transformToBodyFrame(gyroData[0], gyroData[1], gyroData[2],
-                       g_rotation, &gyro_x, &gyro_y, &gyro_z);
-  
-  vector3_t gyro_vec;
-  gyro_vec.x = gyro_x;
-  gyro_vec.y = gyro_y;
-  gyro_vec.z = gyro_z;
-  gyro_vec.valid = true;
-  gyro_vec.timestamp_us = timestampUs;
-  
-  // Transform magnetometer (Android gives µT, normalize and transform)
-  float mag_x, mag_y, mag_z;
-  transformToBodyFrame(magData[0], magData[1], magData[2],
-                       g_rotation, &mag_x, &mag_y, &mag_z);
-  
-  // Normalize magnetometer
-  float mag_norm = sqrtf(mag_x*mag_x + mag_y*mag_y + mag_z*mag_z);
-  vector3_t mag_vec;
-  if (mag_norm > 0.01f) {
-    mag_vec.x = mag_x / mag_norm;
-    mag_vec.y = mag_y / mag_norm;
-    mag_vec.z = mag_z / mag_norm;
-    mag_vec.valid = true;
-  } else {
-    mag_vec.valid = false;
-    mag_vec.x = 0;
-    mag_vec.y = 0;
-    mag_vec.z = 0;
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx || !accel || !gyro || !mag) {
+    return;
   }
-  mag_vec.timestamp_us = timestampUs;
-  
-  // Process GPS if available
-  gps_position_t* gps_pos = nullptr;
-  gps_position_t gps_data = {0};
-  if (gps) {
-    jsize gpsLen = env->GetArrayLength(gps);
-    if (gpsLen >= 9) {
-      jfloat* gpsData = env->GetFloatArrayElements(gps, nullptr);
-      // GPS array format: [lat, lon, alt, vel_n, vel_e, vel_d, hdop, num_sats, valid]
-      if (gpsData[8] > 0.5f) { // valid flag
-        gps_data.lat_deg = gpsData[0];
-        gps_data.lon_deg = gpsData[1];
-        gps_data.alt_m = gpsData[2];
-        // Note: New API computes velocity from track/speed, but we can set reference
-        // For now, we'll set the reference and let the EKF compute velocity
-        if (!ekf->gps_ref_init) {
-          ekf_set_gps_reference(ekf, gpsData[0], gpsData[1], gpsData[2]);
-        }
-        // Compute track and speed from velocity components
-        float vel_n = gpsData[3];
-        float vel_e = gpsData[4];
-        float speed = sqrtf(vel_n*vel_n + vel_e*vel_e);
-        float track = atan2f(vel_e, vel_n) * 180.0f / M_PI;
-        if (track < 0.0f) track += 360.0f;
-        
-        gps_data.track_deg = track;
-        gps_data.speed_ms = speed;
-        gps_data.vs_ms = -gpsData[5]; // Down is positive in NED, but vs_ms is positive up
-        gps_data.valid = true;
-        gps_data.timestamp_us = timestampUs;
-        gps_pos = &gps_data;
-      }
-      env->ReleaseFloatArrayElements(gps, gpsData, JNI_ABORT);
-    }
+
+  jfloat *accelData = env->GetFloatArrayElements(accel, nullptr);
+  jfloat *gyroData = env->GetFloatArrayElements(gyro, nullptr);
+  jfloat *magData = env->GetFloatArrayElements(mag, nullptr);
+  if (!accelData || !gyroData || !magData) {
+    if (accelData) env->ReleaseFloatArrayElements(accel, accelData, JNI_ABORT);
+    if (gyroData) env->ReleaseFloatArrayElements(gyro, gyroData, JNI_ABORT);
+    if (magData) env->ReleaseFloatArrayElements(mag, magData, JNI_ABORT);
+    return;
   }
-  
-  // Process barometer if available
-  baro_pressure_t* baro_ptr = nullptr;
-  baro_pressure_t baro_data = {0};
-  if (baro) {
-    jsize baroLen = env->GetArrayLength(baro);
-    if (baroLen >= 3) {
-      jfloat* baroData = env->GetFloatArrayElements(baro, nullptr);
-      // Baro array format: [pressure_hpa, temperature_c, valid]
-      if (baroData[2] > 0.5f) { // valid flag
-        baro_data.pressure_hpa = baroData[0];
-        baro_data.valid = true;
-        baro_data.timestamp_us = timestampUs;
-        baro_ptr = &baro_data;
-      }
-      env->ReleaseFloatArrayElements(baro, baroData, JNI_ABORT);
-    }
-  }
-  
-  // Calculate dt
-  float dt = 0.016f; // Default 60Hz
-  if (g_last_update_us > 0) {
-    dt = (timestampUs - g_last_update_us) / 1000000.0f;
-    if (dt <= 0.0f || dt > 1.0f) {
-      dt = 0.016f; // Clamp to reasonable values
-    }
-  }
-  g_last_update_us = timestampUs;
-  
-  // Update EKF
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  ekf_update(ekf, &gyro_vec, &accel_vec, &mag_vec, gps_pos, baro_ptr, dt);
-  
-  if (!g_ekf_attitude_initialized && ekf->initialized) {
-    g_ekf_attitude_initialized = true;
-    LOGI("EKF attitude initialized");
-  }
-  
+
+  float ax, ay, az, p, q, r, hx, hy, hz;
+  transformToBodyFrame(accelData[0], accelData[1], accelData[2], ctx->rotation, &ax, &ay, &az);
+  transformToBodyFrame(gyroData[0], gyroData[1], gyroData[2], ctx->rotation, &p, &q, &r);
+  transformToBodyFrame(magData[0], magData[1], magData[2], ctx->rotation, &hx, &hy, &hz);
+
   env->ReleaseFloatArrayElements(accel, accelData, JNI_ABORT);
   env->ReleaseFloatArrayElements(gyro, gyroData, JNI_ABORT);
   env->ReleaseFloatArrayElements(mag, magData, JNI_ABORT);
+
+  double vn = 0.0, ve = 0.0, vd = 0.0;
+  float hacc = -1.0f, vacc = -1.0f, sacc = -1.0f;
+  unsigned long tow = 0;
+  if (gps) {
+    jsize gpsLen = env->GetArrayLength(gps);
+    if (gpsLen >= 10) {
+      jfloat *gpsData = env->GetFloatArrayElements(gps, nullptr);
+      if (gpsData && gpsData[9] > 0.5f) {
+        ctx->last_lat_rad = gpsData[0] * DEG2RAD;
+        ctx->last_lon_rad = gpsData[1] * DEG2RAD;
+        ctx->last_alt_m = gpsData[2];
+        vn = gpsData[3];
+        ve = gpsData[4];
+        vd = gpsData[5];
+        hacc = gpsData[6];
+        vacc = gpsData[7];
+        sacc = gpsData[8];
+        ctx->has_gps = true;
+        tow = (unsigned long)(timestampUs / 1000);
+        updateWmmIfNeeded(ctx, ctx->last_lat_rad, ctx->last_lon_rad, ctx->last_alt_m);
+      }
+      if (gpsData) env->ReleaseFloatArrayElements(gps, gpsData, JNI_ABORT);
+    }
+  }
+
+  float baro_hpa = -1.0f;
+  if (baro) {
+    jsize baroLen = env->GetArrayLength(baro);
+    if (baroLen >= 3) {
+      jfloat *baroData = env->GetFloatArrayElements(baro, nullptr);
+      if (baroData && baroData[2] > 0.5f && baroData[0] > 0.0f) {
+        baro_hpa = baroData[0];
+        ctx->last_baro_hpa = baro_hpa;
+      }
+      if (baroData) env->ReleaseFloatArrayElements(baro, baroData, JNI_ABORT);
+    }
+  }
+
+  double dt = 0.0;
+  if (ctx->last_update_us > 0) {
+    dt = (double)(timestampUs - (jlong)ctx->last_update_us) / 1e6;
+    if (dt < 1e-4) dt = 1e-4;
+    if (dt > 0.2) dt = 0.2;
+  }
+  ctx->last_update_us = (uint64_t)timestampUs;
+  ctx->last_body_ax = ax;
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->filter.update(dt, tow, vn, ve, vd, ctx->last_lat_rad, ctx->last_lon_rad,
+                     ctx->last_alt_m, p, q, r, ax, ay, az, hx, hy, hz,
+                     ctx->bn, ctx->be, ctx->bd, hacc, vacc, sacc,
+                     baro_hpa, ctx->qnh_hpa);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_ahrs_AhrsModule_resetAhrs(JNIEnv *env, jobject thiz, jlong ekfPtr) {
-  if (!ekfPtr) return;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  // Re-initialize the EKF
-  ekf_init(ekf);
-  g_ekf_attitude_initialized = false;
-  g_last_update_us = 0;
-  
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->filter.~uNavINS();
+  new (&ctx->filter) uNavINS();
+  ctx->phase.reset();
+  ctx->last_update_us = 0;
+  ctx->roll_offset_deg = 0.0f;
+  ctx->pitch_offset_deg = 0.0f;
+  ctx->has_gps = false;
+  ctx->has_track = false;
   LOGI("AHRS reset");
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_ahrs_AhrsModule_zeroAhrs(JNIEnv *env, jobject thiz, jlong ekfPtr) {
-  if (!ekfPtr) return;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  ekf_zero_attitude(ekf);
-  
-  LOGI("AHRS leveled");
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->roll_offset_deg = ctx->filter.getRoll_rad() * (float)RAD2DEG;
+  ctx->pitch_offset_deg = ctx->filter.getPitch_rad() * (float)RAD2DEG;
+  LOGI("AHRS leveled (roll offset %.2f pitch offset %.2f)",
+       ctx->roll_offset_deg, ctx->pitch_offset_deg);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_ahrs_AhrsModule_setAhrsRotation(JNIEnv *env, jobject thiz, jint rotation) {
-  g_rotation = static_cast<AhrsRotation>(rotation);
-  g_ekf_attitude_initialized = false; // Force re-initialization
+Java_com_ahrs_AhrsModule_setAhrsRotation(JNIEnv *env, jobject thiz, jlong ekfPtr, jint rotation) {
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->rotation = static_cast<AhrsRotation>(rotation);
   LOGI("Rotation set to %d", rotation);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_ahrs_AhrsModule_setMagneticDeclination(JNIEnv *env, jobject thiz, jlong ekfPtr, jfloat declination) {
-  if (!ekfPtr) return;
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  ekf_set_magnetic_declination(ekf, declination);
-  LOGI("Magnetic declination set to %.1f°", declination);
+Java_com_ahrs_AhrsModule_setMagneticDeclination(JNIEnv *env, jobject thiz,
+                                                jlong ekfPtr, jfloat declination) {
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->declination_deg = declination;
+  ctx->has_declination = true;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_ahrs_AhrsModule_setQNH(JNIEnv *env, jobject thiz, jlong ekfPtr, jfloat qnh) {
-  if (!ekfPtr) return;
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  ekf_set_local_pressure(ekf, qnh);
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  ctx->qnh_hpa = qnh;
   LOGI("QNH set to %.2f hPa", qnh);
 }
-
 
 extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_com_ahrs_AhrsModule_getGpsPosition(JNIEnv *env, jobject thiz, jlong ekfPtr) {
   jdoubleArray result = env->NewDoubleArray(2);
-  if (!ekfPtr || !result) return nullptr;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
+  if (!result) return nullptr;
   jdouble data[2] = {0.0, 0.0};
-  
-  if (ekf->gps_ref_init) {
-    float pos_n, pos_e, pos_d;
-    ekf_get_position(ekf, &pos_n, &pos_e, &pos_d);
-    
-    // Convert NED (meters) to lat/lon offset
-    // 1 degree latitude ≈ 111,320 meters
-    // 1 degree longitude ≈ 111,320 * cos(latitude) meters
-    const double PI = 3.14159265358979323846;
-    double lat_offset = pos_n / 111320.0;
-    double lon_offset = pos_e / (111320.0 * std::cos(ekf->gps_ref_lat * PI / 180.0));
-    data[0] = ekf->gps_ref_lat + lat_offset;
-    data[1] = ekf->gps_ref_lon + lon_offset;
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (ctx) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (ctx->filter.isInitialized()) {
+      data[0] = ctx->filter.getLatitude_rad() * RAD2DEG;
+      data[1] = ctx->filter.getLongitude_rad() * RAD2DEG;
+    }
   }
-  
   env->SetDoubleArrayRegion(result, 0, 2, data);
   return result;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_ahrs_AhrsModule_isPositionReliable(JNIEnv *env, jobject thiz, jlong ekfPtr) {
-  if (!ekfPtr) return JNI_FALSE;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  // Position is reliable if GPS reference is set and filter is initialized
-  return (ekf->gps_ref_init && ekf->initialized) ? JNI_TRUE : JNI_FALSE;
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) return JNI_FALSE;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return (ctx->has_gps && ctx->filter.isInitialized()) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_com_ahrs_AhrsModule_getAhrsOutput(JNIEnv *env, jobject thiz, jlong ekfPtr) {
-  jfloatArray result = env->NewFloatArray(22);
-  if (!ekfPtr || !result) return nullptr;
-  
-  ekf_t* ekf = reinterpret_cast<ekf_t*>(ekfPtr);
-  
-  std::lock_guard<std::mutex> lock(g_ekf_mutex);
-  
-  // Get Euler angles
-  float roll_deg, pitch_deg, yaw_deg;
-  ekf_get_euler(ekf, &roll_deg, &pitch_deg, &yaw_deg);
-  
-  // Get velocity
-  float vel_n, vel_e, vel_d;
-  ekf_get_velocity(ekf, &vel_n, &vel_e, &vel_d);
-  
-  // Get position
-  float pos_n, pos_e, pos_d;
-  ekf_get_position(ekf, &pos_n, &pos_e, &pos_d);
-  
-  // Get barometer altitudes (QNE and QNH)
-  float raw_pressure, filtered_pressure, alt_qne, alt_qnh, baro_vel_d;
-  ekf_get_baro(ekf, &raw_pressure, &filtered_pressure, &alt_qne, &alt_qnh, &baro_vel_d);
-  
-  // Get all three altitudes (GPS, QNE, QNH)
-  float gps_alt = 0.0f;
-  ekf_get_altitudes(ekf, &gps_alt, &alt_qne, &alt_qnh);
-  
-  // Compute derived values
-  float horizontal_speed = sqrtf(vel_n*vel_n + vel_e*vel_e);
-  float total_speed = sqrtf(vel_n*vel_n + vel_e*vel_e + vel_d*vel_d);
-  float track_angle = atan2f(vel_e, vel_n) * 180.0f / M_PI;
-  if (track_angle < 0.0f) track_angle += 360.0f;
-  
-  // Calculate horizontal flight path angle (sideslip/crab angle) from velocity in body frame
-  // Transform NED velocity to body frame using Euler angles
-  float roll_rad = roll_deg * M_PI / 180.0f;
-  float pitch_rad = pitch_deg * M_PI / 180.0f;
-  float yaw_rad = yaw_deg * M_PI / 180.0f;
-  
-  // Build rotation matrix from NED to body frame (Euler ZYX convention)
-  float cr = cosf(roll_rad);
-  float sr = sinf(roll_rad);
-  float cp = cosf(pitch_rad);
-  float sp = sinf(pitch_rad);
-  float cy = cosf(yaw_rad);
-  float sy = sinf(yaw_rad);
-  
-  // DCM from NED to body: R = Rz(yaw) * Ry(pitch) * Rx(roll)
-  // Forward (x): cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr
-  // Right (y): sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr
-  // Down (z): -sp, cp*sr, cp*cr
-  float vx_body = (cy*cp) * vel_n + (cy*sp*sr - sy*cr) * vel_e + (cy*sp*cr + sy*sr) * vel_d;
-  float vy_body = (sy*cp) * vel_n + (sy*sp*sr + cy*cr) * vel_e + (sy*sp*cr - cy*sr) * vel_d;
-  
-  float horizontal_speed_body = sqrtf(vx_body*vx_body + vy_body*vy_body);
-  
-  // Flight path vector is only meaningful when moving
-  // Threshold: 1.0 m/s - below this, FPA calculations are unreliable
-  const float MIN_SPEED_FOR_FPV = 1.0f;
-  
-  // Calculate flight path angle (vertical) - only if moving faster than 1 m/s
-  float flight_path_angle = 0.0f;
-  if (horizontal_speed >= MIN_SPEED_FOR_FPV) {
-    flight_path_angle = atan2f(-vel_d, horizontal_speed) * 180.0f / M_PI;
+  // [roll, pitch, heading, fpa, hfpa, groundTrack, groundSpeed,
+  //  altitude, qne, qnh, vs, vn, ve, vd,
+  //  phase, phaseConf, attitudeValid, altitudeValid, positionValid, phaseValid,
+  //  health, atRest, zupt, declination]
+  jfloatArray result = env->NewFloatArray(24);
+  if (!result) return nullptr;
+  jfloat data[24] = {0};
+  FilterContext *ctx = ctxFrom(ekfPtr);
+  if (!ctx) {
+    env->SetFloatArrayRegion(result, 0, 24, data);
+    return result;
   }
-  
-  // Calculate horizontal flight path angle - only if moving faster than 1 m/s
-  float horizontal_flight_path_angle = 0.0f;
-  if (horizontal_speed_body >= 0.1f && horizontal_speed >= MIN_SPEED_FOR_FPV) {
-    horizontal_flight_path_angle = atan2f(vy_body, vx_body) * 180.0f / M_PI;
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  float roll = ctx->filter.getRoll_rad() * (float)RAD2DEG - ctx->roll_offset_deg;
+  float pitch = ctx->filter.getPitch_rad() * (float)RAD2DEG - ctx->pitch_offset_deg;
+  float heading = wrap360(ctx->filter.getHeading_rad() * (float)RAD2DEG);
+  double vel_n = ctx->filter.getVelNorth_ms();
+  double vel_e = ctx->filter.getVelEast_ms();
+  double vel_d = ctx->filter.getVelDown_ms();
+  float ground_speed = std::sqrt((float)(vel_n * vel_n + vel_e * vel_e));
+
+  float fpa = 0.0f;
+  float hfpa = 0.0f;
+  if (ground_speed >= MIN_SPEED_FOR_FPV) {
+    fpa = ctx->filter.getFlightPathAngle_rad() * (float)RAD2DEG;
+    hfpa = ctx->filter.getHorizontalFlightPathAngle_rad() * (float)RAD2DEG;
   }
-  
-  // Get current timestamp for flight phase confidence/validity checks
-  uint64_t timestamp_us = (uint64_t)(std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::system_clock::now().time_since_epoch()).count());
-  
-  // Get flight phase (already updated in main filter loop)
-  flight_phase_t flight_phase = ekf->flight_phase_state.current_phase;
-  float flight_phase_confidence = ekf_flight_phase_get_confidence(&ekf->flight_phase_state, timestamp_us);
-  bool flight_phase_valid = ekf_flight_phase_is_valid(&ekf->flight_phase_state, timestamp_us);
-  
-  // Output array: [roll, pitch, heading, flightPathAngle, horizontalFlightPathAngle, trackAngle,
-  //                horizontalSpeed, totalSpeed, altitude, altitudeQNE, altitudeQNH,
-  //                verticalSpeed,
-  //                velocityNorth, velocityEast, velocityDown,
-  //                flightPhase, flightPhaseConfidence,
-  //                attitudeValid, altitudeValid, positionValid,
-  //                flightPhaseValid]
-  jfloat data[21] = {
-    roll_deg,                    // 0: roll
-    pitch_deg,                   // 1: pitch
-    yaw_deg,                     // 2: heading (magnetic)
-    flight_path_angle,           // 3: flightPathAngle (0 if speed < 1 m/s)
-    horizontal_flight_path_angle, // 4: horizontalFlightPathAngle (0 if speed < 1 m/s)
-    track_angle,                 // 5: trackAngle
-    horizontal_speed,            // 6: horizontalSpeed
-    total_speed,                 // 7: totalSpeed
-    gps_alt,                     // 8: altitude (GPS MSL)
-    alt_qne,                     // 9: altitudeQNE (barometric QNE, standard atmosphere)
-    alt_qnh,                     // 10: altitudeQNH (barometric QNH, local pressure)
-    -vel_d,                      // 11: verticalSpeed (positive up)
-    vel_n,                       // 12: velocityNorth
-    vel_e,                       // 13: velocityEast
-    vel_d,                       // 14: velocityDown
-    (float)(int)flight_phase,    // 15: flightPhase
-    flight_phase_confidence,      // 16: flightPhaseConfidence
-    ekf->initialized ? 1.0f : 0.0f, // 17: attitudeValid
-    ekf->baro_filter_init ? 1.0f : 0.0f, // 18: altitudeValid
-    ekf->gps_ref_init ? 1.0f : 0.0f, // 19: positionValid
-    flight_phase_valid ? 1.0f : 0.0f  // 20: flightPhaseValid
-  };
-  
-  env->SetFloatArrayRegion(result, 0, 21, data);
+
+  float track;
+  if (ground_speed >= MIN_GROUND_SPEED_FOR_TRACK) {
+    track = wrap360(ctx->filter.getGroundTrack_rad() * (float)RAD2DEG);
+    ctx->last_track_deg = track;
+    ctx->has_track = true;
+  } else if (ctx->has_track) {
+    track = ctx->last_track_deg;
+  } else {
+    track = heading;
+    ctx->last_track_deg = track;
+    ctx->has_track = true;
+  }
+
+  float altitude = (float)ctx->filter.getAltitude_m();
+  float qne = altitude;
+  float qnh_alt = altitude;
+  if (ctx->last_baro_hpa > 0.0f) {
+    float qne_m = AltitudeCalculator::calculateQNE_m(ctx->last_baro_hpa);
+    if (std::isfinite(qne_m)) qne = qne_m;
+    float qnh_m = AltitudeCalculator::calculateQNH_m(ctx->last_baro_hpa, ctx->qnh_hpa);
+    if (std::isfinite(qnh_m)) qnh_alt = qnh_m;
+  }
+
+  float lat_deg = ctx->filter.getLatitude_rad() * (float)RAD2DEG;
+  float lon_deg = ctx->filter.getLongitude_rad() * (float)RAD2DEG;
+  int health = ctx->filter.getHealthStatus();
+  bool initialized = ctx->filter.isInitialized();
+  bool attitude_valid = initialized && health < 3 &&
+                        std::isfinite(roll) && std::isfinite(pitch) && std::isfinite(heading);
+
+  if (ctx->has_gps) {
+    ctx->phase.update(altitude, (float)(-vel_d), ground_speed, lat_deg, lon_deg,
+                      ctx->last_update_us, std::numeric_limits<float>::quiet_NaN(),
+                      ctx->last_body_ax);
+  }
+
+  data[0] = roll;
+  data[1] = pitch;
+  data[2] = heading;
+  data[3] = fpa;
+  data[4] = hfpa;
+  data[5] = track;
+  data[6] = ground_speed;
+  data[7] = altitude;
+  data[8] = qne;
+  data[9] = qnh_alt;
+  data[10] = (float)(-vel_d);
+  data[11] = (float)vel_n;
+  data[12] = (float)vel_e;
+  data[13] = (float)vel_d;
+  data[14] = (float)ctx->phase.getFlightPhase();
+  data[15] = ctx->phase.getConfidence();
+  data[16] = attitude_valid ? 1.0f : 0.0f;
+  data[17] = (ctx->has_gps) ? 1.0f : 0.0f;
+  data[18] = ctx->has_gps ? 1.0f : 0.0f;
+  data[19] = ctx->phase.isValid() ? 1.0f : 0.0f;
+  data[20] = (float)health;
+  data[21] = ctx->filter.isAtRest() ? 1.0f : 0.0f;
+  data[22] = ctx->filter.isZuptActive() ? 1.0f : 0.0f;
+  data[23] = ctx->declination_deg;
+
+  env->SetFloatArrayRegion(result, 0, 24, data);
   return result;
 }

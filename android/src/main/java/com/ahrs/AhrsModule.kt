@@ -63,7 +63,7 @@ class AhrsModule(reactContext: ReactApplicationContext) :
 
   // JNI functions
   private external fun initAhrs(): Long
-  private external fun destroyAhrs()
+  private external fun destroyAhrs(ekfPtr: Long)
   private external fun updateAhrs(
     ekfPtr: Long,
     timestampUs: Long,
@@ -75,8 +75,7 @@ class AhrsModule(reactContext: ReactApplicationContext) :
   )
   private external fun resetAhrs(ekfPtr: Long)
   private external fun zeroAhrs(ekfPtr: Long)
-  private external fun setAhrsRotation(rotation: Int)
-  private external fun setMagneticDeclination(ekfPtr: Long, declination: Float)
+  private external fun setAhrsRotation(ekfPtr: Long, rotation: Int)
   private external fun setQNH(ekfPtr: Long, qnh: Float)
   private external fun getGpsPosition(ekfPtr: Long): DoubleArray
   private external fun isPositionReliable(ekfPtr: Long): Boolean
@@ -129,18 +128,49 @@ class AhrsModule(reactContext: ReactApplicationContext) :
   private var xplaneHost: String? = null
   private var xplaneWasPaused: Boolean = false // Previous pause state for transition detection
 
-  private fun headingOffsetDeg(): Float {
-    return when (rotation) {
-      1 -> 0.0f      // Left: portrait offset (-90°) + 90° CW
-      2 -> -180.0f   // Right: portrait offset (-90°) - 90° CCW
-      else -> -90.0f // Vertical: portrait offset
-    }
-  }
-
   private fun normalizeHeadingDeg(heading: Float): Float {
     var result = heading % 360.0f
     if (result < 0f) result += 360.0f
     return result
+  }
+
+  private fun emitAhrsMap(output: FloatArray) {
+    if (output.size < 24) return
+    val map = Arguments.createMap()
+    map.putDouble("roll", output[0].toDouble())
+    map.putDouble("pitch", output[1].toDouble())
+    map.putDouble("heading", normalizeHeadingDeg(output[2]).toDouble())
+    map.putDouble("magneticDeclination", output[23].toDouble())
+    map.putDouble("groundTrack", normalizeHeadingDeg(output[5]).toDouble())
+    map.putDouble("groundSpeed", output[6].toDouble())
+    map.putDouble("flightPathAngle", output[3].toDouble())
+    map.putDouble("horizontalFlightPathAngle", output[4].toDouble())
+    map.putDouble("altitude", output[7].toDouble())
+    map.putDouble("altitudeQNE", output[8].toDouble())
+    map.putDouble("altitudeQNH", output[9].toDouble())
+    map.putDouble("verticalSpeed", output[10].toDouble())
+    val baroPressure = synchronized(baroLock) {
+      baroData?.getOrNull(0)?.toDouble() ?: 0.0
+    }
+    map.putDouble("barometricPressure", baroPressure)
+    map.putDouble("velocityNorth", output[11].toDouble())
+    map.putDouble("velocityEast", output[12].toDouble())
+    map.putDouble("velocityDown", output[13].toDouble())
+    val gpsPos = getGpsPosition(ekfPtr)
+    if (gpsPos != null && (gpsPos[0] != 0.0 || gpsPos[1] != 0.0)) {
+      map.putDouble("latitude", gpsPos[0])
+      map.putDouble("longitude", gpsPos[1])
+    }
+    map.putInt("flightPhase", output[14].toInt())
+    map.putDouble("flightPhaseConfidence", output[15].toDouble())
+    map.putBoolean("attitudeValid", output[16] > 0.5f)
+    map.putBoolean("altitudeValid", output[17] > 0.5f)
+    map.putBoolean("positionValid", output[18] > 0.5f)
+    map.putBoolean("flightPhaseValid", output[19] > 0.5f)
+    map.putInt("filterHealthStatus", output[20].toInt())
+    map.putBoolean("atRest", output[21] > 0.5f)
+    map.putBoolean("zuptActive", output[22] > 0.5f)
+    emitOnAhrsUpdate(map)
   }
 
   override fun getName(): String = NAME
@@ -166,7 +196,7 @@ class AhrsModule(reactContext: ReactApplicationContext) :
     disconnectFromXPlane()
     stopAhrs()
     if (ekfPtr != 0L) {
-      destroyAhrs()
+      destroyAhrs(ekfPtr)
       ekfPtr = 0L
     }
   }
@@ -332,7 +362,9 @@ class AhrsModule(reactContext: ReactApplicationContext) :
       "right", "landscape_right", "landscaperight" -> 2
       else -> 0
     }
-    setAhrsRotation(rotation)
+    if (ekfPtr != 0L) {
+      setAhrsRotation(ekfPtr, rotation)
+    }
     
     if (oldRotation != rotation) {
       ekfAttitudeInitialized = false
@@ -357,20 +389,28 @@ class AhrsModule(reactContext: ReactApplicationContext) :
     promise.resolve(hasGyro && hasAccel && hasMag)
   }
 
-  /**
-   * Sets magnetic declination for true heading calculation
-   * 
-   * Magnetic declination is the angle between magnetic north and true north.
-   * Critical for navigation - converts magnetic heading to true heading.
-   * 
-   * @param declination Declination in degrees
-   *                    Positive = east (magnetic north is east of true north)
-   *                    Negative = west (magnetic north is west of true north)
-   */
-  override fun setMagneticDeclination(declination: Double) {
-    if (ekfPtr == 0L) return
-    setMagneticDeclination(ekfPtr, declination.toFloat())
-    logI(TAG, "Magnetic declination set to ${declination}°")
+  override fun startRecording() {
+    logW(TAG, "Recording is not implemented on Android yet")
+  }
+
+  override fun stopRecording() {
+    logW(TAG, "Recording is not implemented on Android yet")
+  }
+
+  override fun playbackRecording(filename: String) {
+    logW(TAG, "Playback is not implemented on Android yet")
+  }
+
+  override fun stopPlayback() {
+    logW(TAG, "Playback is not implemented on Android yet")
+  }
+
+  override fun getRecordingFiles(promise: Promise) {
+    promise.resolve(Arguments.createArray())
+  }
+
+  override fun deleteRecording(filename: String) {
+    logW(TAG, "Recording delete is not implemented on Android yet")
   }
 
   /**
@@ -626,8 +666,9 @@ class AhrsModule(reactContext: ReactApplicationContext) :
         gps = floatArrayOf(
           lat, lon, alt,
           velN, velE, velD,
-          1.0f,  // hdop (assume good)
-          12.0f, // numSats (assume good)
+          5.0f,  // hacc m
+          8.0f,  // vacc m
+          0.5f,  // sacc m/s
           1.0f   // valid
         )
       }
@@ -649,43 +690,8 @@ class AhrsModule(reactContext: ReactApplicationContext) :
       val currentTimeNs = System.nanoTime()
       if (currentTimeNs > nextEmitTime) {
         val output = getAhrsOutput(ekfPtr)
-        if (output != null && output.size >= 24) {
-          val map = Arguments.createMap()
-          val headingOffset = headingOffsetDeg()
-          
-          map.putDouble("roll", output[0].toDouble())
-          map.putDouble("pitch", output[1].toDouble())
-          map.putDouble("heading", normalizeHeadingDeg(output[2] + headingOffset).toDouble())
-          map.putDouble("flightPathAngle", output[3].toDouble())
-          map.putDouble("horizontalFlightPathAngle", output[4].toDouble())
-          map.putDouble("trackAngle", output[5].toDouble())
-          map.putDouble("horizontalSpeed", output[6].toDouble())
-          map.putDouble("totalSpeed", output[7].toDouble())
-          map.putDouble("altitude", output[8].toDouble())
-          map.putDouble("altitudeQNE", output[9].toDouble())
-          map.putDouble("altitudeQNH", output[10].toDouble())
-          map.putDouble("verticalSpeed", output[11].toDouble())
-          // Get barometric pressure from baroData if available
-          val baroPressure = synchronized(baroLock) {
-            baroData?.getOrNull(0)?.toDouble() ?: 0.0
-          }
-          map.putDouble("barometricPressure", baroPressure)
-          map.putDouble("velocityNorth", output[12].toDouble())
-          map.putDouble("velocityEast", output[13].toDouble())
-          map.putDouble("velocityDown", output[14].toDouble())
-          val gpsPos = getGpsPosition(ekfPtr)
-          if (gpsPos[0] != 0.0 || gpsPos[1] != 0.0) {
-            map.putDouble("latitude", gpsPos[0])
-            map.putDouble("longitude", gpsPos[1])
-          }
-          map.putInt("flightPhase", output[15].toInt())
-          map.putDouble("flightPhaseConfidence", output[16].toDouble())
-          map.putBoolean("attitudeValid", output[17] > 0.5f)
-          map.putBoolean("altitudeValid", output[18] > 0.5f)
-          map.putBoolean("positionValid", output[19] > 0.5f)
-          map.putBoolean("flightPhaseValid", output[20] > 0.5f)
-          
-          emitOnAhrsUpdate(map)
+        if (output != null) {
+          emitAhrsMap(output)
         }
         nextEmitTime = currentTimeNs + emitRateHz.hz
       }
@@ -725,7 +731,7 @@ class AhrsModule(reactContext: ReactApplicationContext) :
         // Calibrate barometer against GPS if available
         synchronized(locationLock) {
           val gps = locationData
-          if (!baroCalibrated && gps != null && gps.size >= 9 && gps[8] > 0.5f) {
+          if (!baroCalibrated && gps != null && gps.size >= 10 && gps[9] > 0.5f) {
             val gpsAltMsl = gps[2]
             val pressureRatio = Math.pow(
               1.0 - gpsAltMsl / 44330.0,
@@ -877,9 +883,25 @@ class AhrsModule(reactContext: ReactApplicationContext) :
     var velD = 0.0f
     var speed = 0.0f
 
-    if (location.hasSpeed() && location.speedAccuracy >= 0) {
+    val speedAcc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasSpeedAccuracy()) {
+      location.speedAccuracyMetersPerSecond
+    } else {
+      -1.0f
+    }
+    val bearingAcc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasBearingAccuracy()) {
+      location.bearingAccuracyDegrees
+    } else {
+      -1.0f
+    }
+    val verticalAcc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasVerticalAccuracy()) {
+      location.verticalAccuracyMeters
+    } else {
+      -1.0f
+    }
+
+    if (location.hasSpeed() && (speedAcc < 0.0f || speedAcc < 5.0f)) {
       speed = location.speed
-      if (location.hasBearing() && location.bearingAccuracy >= 0) {
+      if (location.hasBearing() && (bearingAcc < 0.0f || bearingAcc < 45.0f)) {
         val courseRad = Math.toRadians(location.bearing.toDouble()).toFloat()
         velN = speed * kotlin.math.cos(courseRad)
         velE = speed * kotlin.math.sin(courseRad)
@@ -907,17 +929,9 @@ class AhrsModule(reactContext: ReactApplicationContext) :
     }
 
     val horizontalAccuracy = location.accuracy
-    val numSats = when {
-      horizontalAccuracy < 0 -> 0
-      horizontalAccuracy < 5.0f -> 12
-      horizontalAccuracy < 10.0f -> 10
-      horizontalAccuracy < 20.0f -> 8
-      horizontalAccuracy < 50.0f -> 6
-      else -> 4
-    }
-
-    val hdop = (horizontalAccuracy / 3.0f).coerceIn(1.0f, 20.0f)
-    val vdop = (location.verticalAccuracy / 3.0f).coerceIn(1.0f, 20.0f)
+    val hacc = if (horizontalAccuracy > 0.0f) horizontalAccuracy else -1.0f
+    val vacc = if (verticalAcc > 0.0f) verticalAcc else -1.0f
+    val sacc = if (speedAcc >= 0.0f) speedAcc else -1.0f
 
     val valid = isValidLocation(location) && speed <= 200.0f
 
@@ -929,8 +943,9 @@ class AhrsModule(reactContext: ReactApplicationContext) :
         velN,
         velE,
         velD,
-        hdop,
-        numSats.toFloat(),
+        hacc,
+        vacc,
+        sacc,
         if (valid) 1.0f else 0.0f
       )
     }
@@ -1009,7 +1024,7 @@ class AhrsModule(reactContext: ReactApplicationContext) :
       var gpsCopy: FloatArray? = null
       synchronized(locationLock) {
         val gps = locationData
-        if (gps != null && (gps[8] > 0.5f) && timestampUs != lastUsedLocationTimestamp) {
+        if (gps != null && gps.size >= 10 && gps[9] > 0.5f && timestampUs != lastUsedLocationTimestamp) {
           gpsCopy = gps.clone()
           lastUsedLocationTimestamp = timestampUs
         }
@@ -1031,43 +1046,8 @@ class AhrsModule(reactContext: ReactApplicationContext) :
       // Emit output at configured rate
       if (currentTimeNs > nextEmitTime) {
         val output = getAhrsOutput(ekfPtr)
-        if (output != null && output.size >= 24) {
-          val map = Arguments.createMap()
-          val headingOffset = headingOffsetDeg()
-          
-          map.putDouble("roll", output[0].toDouble())
-          map.putDouble("pitch", output[1].toDouble())
-          map.putDouble("heading", normalizeHeadingDeg(output[2] + headingOffset))
-          map.putDouble("flightPathAngle", output[3].toDouble())
-          map.putDouble("horizontalFlightPathAngle", output[4].toDouble())
-          map.putDouble("trackAngle", output[5].toDouble())
-          map.putDouble("horizontalSpeed", output[6].toDouble())
-          map.putDouble("totalSpeed", output[7].toDouble())
-          map.putDouble("altitude", output[8].toDouble())
-          map.putDouble("altitudeQNE", output[9].toDouble())
-          map.putDouble("altitudeQNH", output[10].toDouble())
-          map.putDouble("verticalSpeed", output[11].toDouble())
-          // Get barometric pressure from baroData if available
-          val baroPressure = synchronized(baroLock) {
-            baroData?.getOrNull(0)?.toDouble() ?: 0.0
-          }
-          map.putDouble("barometricPressure", baroPressure)
-          map.putDouble("velocityNorth", output[12].toDouble())
-          map.putDouble("velocityEast", output[13].toDouble())
-          map.putDouble("velocityDown", output[14].toDouble())
-          val gpsPos = getGpsPosition(ekfPtr)
-          if (gpsPos[0] != 0.0 || gpsPos[1] != 0.0) {
-            map.putDouble("latitude", gpsPos[0])
-            map.putDouble("longitude", gpsPos[1])
-          }
-          map.putInt("flightPhase", output[15].toInt())
-          map.putDouble("flightPhaseConfidence", output[16].toDouble())
-          map.putBoolean("attitudeValid", output[17] > 0.5f)
-          map.putBoolean("altitudeValid", output[18] > 0.5f)
-          map.putBoolean("positionValid", output[19] > 0.5f)
-          map.putBoolean("flightPhaseValid", output[20] > 0.5f)
-          
-          emitOnAhrsUpdate(map)
+        if (output != null) {
+          emitAhrsMap(output)
         }
         nextEmitTime = currentTimeNs + emitRateHz.hz
       }
