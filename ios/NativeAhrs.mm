@@ -557,7 +557,6 @@ RCT_EXPORT_METHOD(deleteRecording : (NSString *)filename) {
  */
 RCT_EXPORT_METHOD(setQNH : (double)qnh) {
   _qnh = qnh;
-  AHRS_LOG(@"✅ QNH set to %.2f hPa", qnh);
 }
 
 /**

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <limits>
 
 #include "uNavINS.h"
 
@@ -338,6 +339,61 @@ static void testInitIndependentInstances() {
   b.begin();
   expectTrue(b.filter.isInitialized(), "Second instance initializes independently");
   expectTrue(std::isfinite(b.filter.getHeading_rad()), "Second instance heading is finite");
+}
+
+// ============================================================================
+// Heading lock
+// ============================================================================
+
+static void testHeadingHoldWithoutWmm() {
+  std::printf("\n=== Heading: lock without WMM against gyro bias ===\n");
+  World w;
+  w.heading_deg = 90.0f;
+  w.bn = std::numeric_limits<float>::quiet_NaN();
+  w.be = std::numeric_limits<float>::quiet_NaN();
+  w.bd = std::numeric_limits<float>::quiet_NaN();
+  w.set_course(0.0f, 90.0f);
+  const float gyro_bias = 1.0f * DEG_TO_RAD;
+  for (int i = 0; i < 600; i++) {  // 10 s
+    w.step(levelSensors(90.0f, gyro_bias));
+  }
+  expectNearDeg(w.filter.getHeading_rad(), 90.0f, 8.0f,
+                "Heading holds 90° without WMM despite 1°/s gyro bias");
+}
+
+static void testHeadingRecoversAfterDelayedWmm() {
+  std::printf("\n=== Heading: recover after delayed WMM ===\n");
+  World w;
+  w.heading_deg = 0.0f;
+  w.set_course(0.0f, 0.0f);
+  w.begin();
+  expectNearDeg(w.filter.getHeading_rad(), 0.0f, 8.0f, "Init heading north");
+
+  w.bn = std::numeric_limits<float>::quiet_NaN();
+  w.be = std::numeric_limits<float>::quiet_NaN();
+  w.bd = std::numeric_limits<float>::quiet_NaN();
+  const float nan_mag = std::numeric_limits<float>::quiet_NaN();
+  const float gyro_bias = 4.0f * DEG_TO_RAD;
+  for (int i = 0; i < 300; i++) {  // 5 s gyro-only
+    SimulatedSensors s = levelSensors(0.0f, gyro_bias);
+    s.mx = nan_mag;
+    s.my = nan_mag;
+    s.mz = nan_mag;
+    w.step(s);
+  }
+  float drift_deg = w.filter.getHeading_rad() * RAD_TO_DEG;
+  if (drift_deg > 180.0f) drift_deg -= 360.0f;
+  std::printf("  Gyro-only drift: %.2f°\n", drift_deg);
+  expectTrue(std::fabs(drift_deg) > 13.0f, "Heading drifted more than 13° without mag");
+
+  w.bn = 19000.0f;
+  w.be = -1000.0f;
+  w.bd = 45000.0f;
+  for (int i = 0; i < 180; i++) {  // 3 s
+    w.step(levelSensors(0.0f));
+  }
+  expectNearDeg(w.filter.getHeading_rad(), 0.0f, 12.0f,
+                "Heading recovers when WMM and mag return");
 }
 
 // ============================================================================
@@ -1073,6 +1129,8 @@ int main() {
   testInitZeroMag();
   testInitHeadingCardinals();
   testInitIndependentInstances();
+  testHeadingHoldWithoutWmm();
+  testHeadingRecoversAfterDelayedWmm();
 
   testStaticDesk();
   testStaticHandheld();

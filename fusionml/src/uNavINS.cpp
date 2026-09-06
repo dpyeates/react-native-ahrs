@@ -46,7 +46,8 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
                      float hx, float hy, float hz,
                      float bn, float be, float bd,
                      float hacc, float vacc, float sacc,
-                     float baro_pressure, float baro_qnh) {
+                     float baro_pressure, float baro_qnh,
+                     float mag_sigma_scale) {
   if (!initialized) {
     if (!std::isfinite(ax) || !std::isfinite(ay) || !std::isfinite(az) ||
         !std::isfinite(p) || !std::isfinite(q) || !std::isfinite(r)) {
@@ -424,43 +425,53 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
       }
     }
 
-    // Magnetometer: tilt-compensated heading at up to 10 Hz of filter time
+    // Magnetometer: tilt-compensated heading at up to 10 Hz of filter time.
+    // WMM (bn, be, bd) is optional — heading still locks from mag when it is NAN.
     const float MAG_UPDATE_PERIOD_S = 0.1f;
     bool mag_update_ready = (last_mag_update_time < 0.0) ||
                             ((filter_time - last_mag_update_time) >= MAG_UPDATE_PERIOD_S);
     bool mag_field_valid = std::isfinite(bn) && std::isfinite(be) && std::isfinite(bd);
     bool mag_meas_valid = std::isfinite(hx) && std::isfinite(hy) && std::isfinite(hz);
 
-    if (mag_update_ready && mag_field_valid && mag_meas_valid) {
+    if (mag_update_ready && mag_meas_valid) {
       last_mag_update_time = filter_time;
       C_N2B = quat2dcm(quat);
       C_B2N = C_N2B.transpose();
       float hx_meas = hx * 1000.0f;
       float hy_meas = hy * 1000.0f;
       float hz_meas = hz * 1000.0f;
-      Eigen::Matrix<float,3,1> mag_ned_exp;
-      mag_ned_exp << bn, be, bd;
-      mag_expected_body = C_N2B * mag_ned_exp;
 
       float measured_field = sqrtf(hx_meas*hx_meas + hy_meas*hy_meas + hz_meas*hz_meas);
-      float expected_field = mag_ned_exp.norm();
-      float field_ratio = (expected_field > 0.0f) ? (measured_field / expected_field) : 0.0f;
-      bool mag_magnitude_ok = (field_ratio > 0.5f && field_ratio < 2.0f);
+      bool mag_magnitude_ok;
+      float Bh_exp = 0.0f;
+      if (mag_field_valid) {
+        Eigen::Matrix<float,3,1> mag_ned_exp;
+        mag_ned_exp << bn, be, bd;
+        mag_expected_body = C_N2B * mag_ned_exp;
+        float expected_field = mag_ned_exp.norm();
+        float field_ratio = (expected_field > 0.0f) ? (measured_field / expected_field) : 0.0f;
+        mag_magnitude_ok = (field_ratio > 0.5f && field_ratio < 2.0f);
+        Bh_exp = sqrtf(bn*bn + be*be);
+      } else {
+        // Earth field is typically 25–65 µT; allow 20–80 µT without WMM
+        mag_magnitude_ok = (measured_field > 20000.0f && measured_field < 80000.0f);
+      }
 
       // Attitude gate: horizontal mag is only a heading measurement near level
       const float MAG_ATT_LIMIT = 0.52f; // ~30 deg
       bool mag_attitude_ok = (fabsf(phi) < MAG_ATT_LIMIT && fabsf(theta) < MAG_ATT_LIMIT);
 
-      // Inclination in NED for both measured and expected
-      Eigen::Matrix<float,3,1> mag_body_corr;
-      mag_body_corr << (hx_meas - mbx), (hy_meas - mby), (hz_meas - mbz);
-      Eigen::Matrix<float,3,1> mag_ned_meas = C_B2N * mag_body_corr;
-      float Bh_meas = sqrtf(mag_ned_meas(0)*mag_ned_meas(0) + mag_ned_meas(1)*mag_ned_meas(1));
-      float Bh_exp = sqrtf(bn*bn + be*be);
-      float inclination_meas = atan2f(mag_ned_meas(2), fmaxf(Bh_meas, 1.0f));
-      float inclination_exp = atan2f(bd, fmaxf(Bh_exp, 1.0f));
-      float inclination_error = fabsf(constrainAngle180(inclination_meas - inclination_exp));
-      bool mag_inclination_ok = (inclination_error < 0.35f);
+      bool mag_inclination_ok = true;
+      if (mag_field_valid) {
+        Eigen::Matrix<float,3,1> mag_body_corr;
+        mag_body_corr << (hx_meas - mbx), (hy_meas - mby), (hz_meas - mbz);
+        Eigen::Matrix<float,3,1> mag_ned_meas = C_B2N * mag_body_corr;
+        float Bh_meas = sqrtf(mag_ned_meas(0)*mag_ned_meas(0) + mag_ned_meas(1)*mag_ned_meas(1));
+        float inclination_meas = atan2f(mag_ned_meas(2), fmaxf(Bh_meas, 1.0f));
+        float inclination_exp = atan2f(bd, fmaxf(Bh_exp, 1.0f));
+        float inclination_error = fabsf(constrainAngle180(inclination_meas - inclination_exp));
+        mag_inclination_ok = (inclination_error < 0.35f);
+      }
 
       Eigen::Matrix<float,3,1> mag_meas_current;
       mag_meas_current << hx_meas, hy_meas, hz_meas;
@@ -483,23 +494,33 @@ void uNavINS::update(double dt_in, unsigned long TOW, double vn, double ve, doub
         Byc = hy_c * cosf(phi) - hz_c * sinf(phi);
         float mag_heading = constrainAngle180(atan2f(-Byc, Bxc));
         float yaw_error = constrainAngle180(mag_heading - psi);
-        float sigma_yaw = (Bh_exp > 1.0f) ? (SIG_MAG / Bh_exp) : 0.0f;
-        float innov_gate = 3.0f * sigma_yaw;
-        if (sigma_yaw > 0.0f && fabsf(yaw_error) < innov_gate) {
-          Eigen::Matrix<float,1,18> H_mag;
-          H_mag.setZero();
-          H_mag(0,8) = 1.0f;
-          float R_mag = sigma_yaw * sigma_yaw;
-          float S_mag = (H_mag * P * H_mag.transpose())(0,0) + R_mag;
+        float scale = (std::isfinite(mag_sigma_scale) && mag_sigma_scale > 0.0f)
+                          ? mag_sigma_scale : 1.0f;
+        float sig_mag = SIG_MAG * scale;
+        float Bh_horiz = sqrtf(Bxc * Bxc + Byc * Byc);
+        float sigma_yaw = (mag_field_valid && Bh_exp > 1.0f)
+                              ? (sig_mag / Bh_exp)
+                              : (sig_mag / fmaxf(Bh_horiz, 15000.0f));
+        Eigen::Matrix<float,1,18> H_mag;
+        H_mag.setZero();
+        H_mag(0,8) = 1.0f;
+        float R_mag = sigma_yaw * sigma_yaw;
+        float S_mag = (H_mag * P * H_mag.transpose())(0,0) + R_mag;
+        float innov_gate = 3.0f * sqrtf(fmaxf(S_mag, 0.0f));
+        if (sigma_yaw > 0.0f && S_mag > 0.0f && fabsf(yaw_error) < innov_gate) {
           Eigen::Matrix<float,18,1> K_mag = (P * H_mag.transpose()) / S_mag;
           Eigen::Matrix<float,18,18> I_KH_mag = Eigen::Matrix<float,18,18>::Identity() - K_mag * H_mag;
           P = I_KH_mag * P * I_KH_mag.transpose() + K_mag * R_mag * K_mag.transpose();
           P = 0.5f*(P + P.transpose());
           x = K_mag * yaw_error;
+          // Error-state yaw is a quaternion vector part (half-angle)
+          x(8, 0) *= 0.5f;
           applyNavigationCorrection(x);
-          const float MAG_BIAS_ALPHA = 0.01f;
-          mbx += MAG_BIAS_ALPHA * (hx_meas - mag_expected_body(0) - mbx);
-          mby += MAG_BIAS_ALPHA * (hy_meas - mag_expected_body(1) - mby);
+          if (mag_field_valid) {
+            const float MAG_BIAS_ALPHA = 0.01f;
+            mbx += MAG_BIAS_ALPHA * (hx_meas - mag_expected_body(0) - mbx);
+            mby += MAG_BIAS_ALPHA * (hy_meas - mag_expected_body(1) - mby);
+          }
         }
       }
     }

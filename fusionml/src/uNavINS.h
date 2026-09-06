@@ -44,9 +44,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Enhancement 1: Tilt-compensated magnetometer heading with WMM
 // ------------------------------------------------------------------
-//  Expected Earth field in NED from World Magnetic Model (XYZgeomag)
 //  Measured field (after subtracting estimated mag bias) tilt-compensated to horizontal
 //  Scalar yaw error drives heading update only (roll/pitch from IMU/GPS)
+//  WMM expected NED field is optional: used for tighter magnitude/inclination
+//  gates and mag-bias LPF. Heading still locks from mag when WMM is NAN.
 //
 // Enhancement 2: GPS rate-aware measurement noise
 // ------------------------------------------------------------------
@@ -214,6 +215,7 @@ class uNavINS {
     // @param sacc Speed accuracy (m/s), optional, use NAN or -1 if unavailable
     // @param baro_pressure Barometric pressure (hPa), optional, use NAN or -1 if unavailable
     // @param   (hPa), optional, use 1013.25 for QNE or -1 if unavailable
+    // @param mag_sigma_scale Multiplier for SIG_MAG (1 = nominal; >1 = less trust)
     void update(double dt, unsigned long TOW, double vn, double ve, double vd,
                 double lat, double lon, double alt,
                 float p, float q, float r,
@@ -224,7 +226,8 @@ class uNavINS {
                 float vacc = -1.0f,
                 float sacc = -1.0f,
                 float baro_pressure = -1.0f,
-                float baro_qnh = 1013.25f);
+                float baro_qnh = 1013.25f,
+                float mag_sigma_scale = 1.0f);
     float getPitch_rad();
     float getRoll_rad();
     float getYaw_rad();

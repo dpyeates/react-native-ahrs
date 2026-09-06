@@ -1,4 +1,4 @@
-import { CodegenTypes, type TurboModule } from 'react-native';
+import { type CodegenTypes, type TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
 
 /**

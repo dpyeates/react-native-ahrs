@@ -332,11 +332,10 @@ typedef NS_ENUM(NSInteger, AhrsRotation) {
 
 /**
  * @property magFusionGated
- * @brief True when magnetometer fusion is disabled due to low iOS calibration accuracy
+ * @brief True when iOS mag calibration is Low or Uncalibrated
  *
- * Set in sensor processing when CMMagneticFieldCalibrationAccuracy is not Medium/High.
- * When true, filter does not receive WMM expected mag (NAN) so yaw is not corrected by mag.
- * Useful for diagnostic logging (e.g. heading comparison).
+ * Fusion still runs; the filter receives an inflated mag noise scale so yaw
+ * is corrected more weakly. Useful for diagnostic logging.
  */
 @property(nonatomic, assign) BOOL magFusionGated;
 

@@ -6,9 +6,9 @@ const root = path.resolve(__dirname, '..');
 
 /**
  * Metro configuration
- * https://facebook.github.io/metro/docs/configuration
+ * https://reactnative.dev/docs/metro
  *
- * @type {import('metro-config').MetroConfig}
+ * @type {import('@react-native/metro-config').MetroConfig}
  */
 module.exports = withMetroConfig(getDefaultConfig(__dirname), {
   root,

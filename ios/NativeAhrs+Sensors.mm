@@ -266,22 +266,34 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
   }
   self.lastTimestampUs = timestamp_us;
   
-  // Gate magnetometer fusion based on Core Motion calibration accuracy
-  BOOL magAccuracyOk = (motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyMedium ||
-                        motion.magneticField.accuracy == CMMagneticFieldCalibrationAccuracyHigh);
-  self.magFusionGated = !magAccuracyOk;
-  static BOOL s_lastMagAccuracyOk = YES;
-  if (magAccuracyOk != s_lastMagAccuracyOk) {
-    if (magAccuracyOk) {
-      AHRS_LOG(@"🧭 Mag fusion resumed (iOS calibration accuracy OK)");
-    } else {
-      AHRS_LOG(@"⚠️ Mag fusion gated (iOS calibration accuracy low) - filter yaw not corrected by mag");
-    }
-    s_lastMagAccuracyOk = magAccuracyOk;
+  // Scale mag measurement noise from Core Motion calibration accuracy.
+  // Low/uncalibrated still fuses heading; it just trusts mag less.
+  float magSigmaScale = 1.0f;
+  switch (motion.magneticField.accuracy) {
+    case CMMagneticFieldCalibrationAccuracyHigh:
+    case CMMagneticFieldCalibrationAccuracyMedium:
+      magSigmaScale = 1.0f;
+      self.magFusionGated = NO;
+      break;
+    case CMMagneticFieldCalibrationAccuracyLow:
+      magSigmaScale = 2.5f;
+      self.magFusionGated = YES;
+      break;
+    default:
+      magSigmaScale = 4.0f;
+      self.magFusionGated = YES;
+      break;
   }
-  float expectedMagN_nT = magAccuracyOk ? self.expectedMagN_nT : NAN;
-  float expectedMagE_nT = magAccuracyOk ? self.expectedMagE_nT : NAN;
-  float expectedMagD_nT = magAccuracyOk ? self.expectedMagD_nT : NAN;
+  static BOOL s_lastMagFusionGated = NO;
+  if (self.magFusionGated != s_lastMagFusionGated) {
+    if (self.magFusionGated) {
+      AHRS_LOG(@"🧭 Mag fusion using inflated noise (iOS calibration accuracy low/uncalibrated, scale=%.1f)",
+               magSigmaScale);
+    } else {
+      AHRS_LOG(@"🧭 Mag fusion using nominal noise (iOS calibration accuracy OK)");
+    }
+    s_lastMagFusionGated = self.magFusionGated;
+  }
 
   // Get barometer data for filter fusion
   baro_pressure_t baro;
@@ -304,9 +316,10 @@ static void calculateExpectedMagFieldNED(double lat_deg, double lon_deg, double 
                   (float)body_gyro_y, (float)body_gyro_z, (float)body_accel_x,
                   (float)body_accel_y, (float)body_accel_z, (float)body_mag_x,
                   (float)body_mag_y, (float)body_mag_z,
-                  expectedMagN_nT, expectedMagE_nT, expectedMagD_nT,
+                  self.expectedMagN_nT, self.expectedMagE_nT, self.expectedMagD_nT,
                   hacc, vacc, sacc,
-                  baro_pressure_hpa, baro_qnh_hpa);
+                  baro_pressure_hpa, baro_qnh_hpa,
+                  magSigmaScale);
   
   // Store latest forward acceleration for flight phase detection
   self.lastBodyAccelX = (float)body_accel_x;
